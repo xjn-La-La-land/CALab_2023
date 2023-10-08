@@ -3,10 +3,10 @@ module mycpu_top(
     input  wire        clk,
     input  wire        resetn,
     // inst sram interface
-    output wire [3:0]  inst_sram_we,    // RAM字节写使能
+    output wire [3:0]  inst_sram_we,    // RAM字节写使�?
     output wire [31:0] inst_sram_addr,
     output wire [31:0] inst_sram_wdata,
-    output wire        inst_sram_en,    // RAM的片选信号，高电平有效
+    output wire        inst_sram_en,    // RAM的片选信号，高电平有�?
     input  wire [31:0] inst_sram_rdata,
     // data sram interface
     output wire [3:0]  data_sram_we,
@@ -41,11 +41,12 @@ module mycpu_top(
     wire        ID_valid;
     wire        EX_valid;
     wire        MEM_valid;
+    wire        WB_valid;
 
     wire        br_taken;      // 跳转信号
-    wire        br_target;
+    wire [31:0] br_target;
 
-    wire [31:0] rf_rdata1;         // 读数据
+    wire [31:0] rf_rdata1;         // 读数�?
     wire [31:0] rf_rdata2;  
     
     wire        rf_we_EX;       // 用于读写对比
@@ -60,14 +61,14 @@ module mycpu_top(
     wire [ 4:0] rf_waddr_WB;
     wire [31:0] rf_wdata_WB;
 
-    wire [ 4:0] rf_raddr1;        // 读地址
+    wire [ 4:0] rf_raddr1;        // 读地�?
     wire [ 4:0] rf_raddr2;
     wire        rf_we;
     wire [ 4:0] rf_waddr;
-    wire        res_from_mem;   // 最后要写进寄存器的结果是否
+    wire        res_from_mem;   // �?后要写进寄存器的结果是否
 
     wire [11:0] alu_op;         // ALU的操作码 
-    wire [31:0] alu_src1;       // ALU的输入          
+    wire [31:0] alu_src1;       // ALU的输�?          
     wire [31:0] alu_src2;
 
     wire [3:0]  data_sram_we_ID;
@@ -107,7 +108,7 @@ module mycpu_top(
         .br_taken     (br_taken),
 
         .to_valid     (IF_valid),
-        .to_allowin   (ID_allowin),
+        .to_allowin   (IF_allowin),
 
         .PC           (pc_IF_to_ID)
     );
@@ -125,34 +126,37 @@ module mycpu_top(
         .rf_rdata1(rf_rdata1),         
         .rf_rdata2(rf_rdata2),        
 
-        .rf_we_EX(rf_we_EX),       // 用于读写对比
+        .rf_we_EX(rf_we_EX & EX_valid),       // 用于读写对比
         .rf_waddr_EX(rf_waddr_EX),
 
-        .rf_we_MEM(rf_we_MEM),
+        .rf_we_MEM(rf_we_MEM & MEM_valid),
         .rf_waddr_MEM(rf_waddr_MEM),
+        
+        .rf_we_WB(rf_we_WB & WB_valid),
+        .rf_waddr_WB(rf_waddr_WB),
 
         .to_valid(ID_valid),       // IF数据可以发出
-        .to_allowin(ID_allowin),     // 允许preIF阶段的数据进入
+        .to_allowin(ID_allowin),     // 允许preIF阶段的数据进�?
 
         .br_taken(br_taken),       // 跳转信号
         .br_target(br_target),    
 
-        .raddr1(raddr1),         // 读地址
-        .raddr2(raddr2),
+        .rf_raddr1(rf_raddr1),         // 读地�?
+        .rf_raddr2(rf_raddr2),
 
         .rf_we(rf_we),
         .rf_waddr(rf_waddr),
-        .res_from_mem(res_from_mem),   // 最后要写进寄存器的结果是否来自wire
+        .res_from_mem(res_from_mem),   // �?后要写进寄存器的结果是否来自wire
 
         .alu_op(alu_op),         // ALU的操作码 
-        .alu_src1(alu_src1),       // ALU的输入          
+        .alu_src1(alu_src1),       // ALU的输�?          
         .alu_src2(alu_src2),
         
-        .data_sram_we(data_sram_we),
-        .data_sram_wdata(data_sram_wdata),
-        .data_sram_en(data_sram_en),
+        .data_sram_we(data_sram_we_ID),
+        .data_sram_wdata(data_sram_wdata_ID),
+        .data_sram_en(data_sram_en_ID),
 
-        .PC(pc_ID_to_EX),
+        .PC(pc_ID_to_EX)
     );
 
     pipe_EX u_pipe_EX(
@@ -165,31 +169,31 @@ module mycpu_top(
         .from_pc(pc_ID_to_EX), 
 
         .alu_op_ID(alu_op),         // ALU的操作码 
-        .alu_src1_ID(alu_src1),       // ALU的输入          
+        .alu_src1_ID(alu_src1),       // ALU的输�?          
         .alu_src2_ID(alu_src2),
 
         .rf_we_ID(rf_we),
         .rf_waddr_ID(rf_waddr),
-        .res_from_mem_ID(res_from_mem),   // 最后要写进寄存器的结果是否来自内存
+        .res_from_mem_ID(res_from_mem),   // �?后要写进寄存器的结果是否来自内存
 
         .data_sram_we_ID(data_sram_we_ID),
         .data_sram_wdata_ID(data_sram_wdata_ID),
         .data_sram_en_ID(data_sram_en_ID),
 
         .to_valid(EX_valid),       // IF数据可以发出
-        .to_allowin(EX_allowin),     // 允许preIF阶段的数据进入 
+        .to_allowin(EX_allowin),     // 允许preIF阶段的数据进�? 
 
         .alu_result(alu_result), // 用于MEM阶段计算结果
 
         .rf_we(rf_we_EX),          // 用于读写对比
         .rf_waddr(rf_waddr_EX),
-        .res_from_mem(res_from_mem_EX),   // 最后要写进寄存器的结果是否来自内存 
+        .res_from_mem(res_from_mem_EX),   // �?后要写进寄存器的结果是否来自内存 
 
         .data_sram_we(data_sram_we),
         .data_sram_wdata(data_sram_wdata),
         .data_sram_en(data_sram_en),
 
-        .PC(pc_EX_to_MEM),
+        .PC(pc_EX_to_MEM)
     );
 
     // EX
@@ -211,18 +215,18 @@ module mycpu_top(
 
         .rf_we_EX(rf_we_EX),
         .rf_waddr_EX(rf_waddr_EX),
-        .res_from_mem_EX(res_from_mem_EX),   // 最后要写进寄存器的结果是否来自内存
+        .res_from_mem_EX(res_from_mem_EX),   // �?后要写进寄存器的结果是否来自内存
 
-        .data_sram_rdata(data_sram_rdata),   // 读数据
+        .data_sram_rdata(data_sram_rdata),   // 读数�?
 
         .to_valid(MEM_valid),       // IF数据可以发出
-        .to_allowin(MEM_allowin),     // 允许preIF阶段的数据进入 
+        .to_allowin(MEM_allowin),     // 允许preIF阶段的数据进�? 
 
         .rf_we(rf_we_MEM),          // 用于读写对比
         .rf_waddr(rf_waddr_MEM),
-        .rf_wdata(rf_wdata), // 用于MEM阶段计算结
+        .rf_wdata(rf_wdata), // 用于MEM阶段计算�?
 
-        .PC(pc_MEM_to_WB),
+        .PC(pc_MEM_to_WB)
     );
 
     pipe_WB u_pipe_WB(
@@ -231,17 +235,19 @@ module mycpu_top(
 
         .from_valid(MEM_valid),     
         .from_pc(pc_MEM_to_WB), 
-        .to_allowin(WB_allowin),     
+        
+        .to_allowin(WB_allowin),    
+        .to_valid(WB_valid), 
 
         .rf_we_MEM(rf_we_MEM),
         .rf_waddr_MEM(rf_waddr_MEM),
-        .rf_wdata_MEM(rf_wdata),   // 最后要写进寄存器的结果是否来自内
+        .rf_wdata_MEM(rf_wdata),   // �?后要写进寄存器的结果是否来自�?
 
         .rf_we(rf_we_WB),          
         .rf_waddr(rf_waddr_WB),
         .rf_wdata(rf_wdata_WB),
 
-        .PC(pc_WB),
+        .PC(pc_WB)
     );
 
     regfile u_regfile(
@@ -250,7 +256,7 @@ module mycpu_top(
         .rdata1 (rf_rdata1),
         .raddr2 (rf_raddr2),
         .rdata2 (rf_rdata2),
-        .we     (rf_we_WB ),
+        .we     (rf_we_WB & WB_valid),
         .waddr  (rf_waddr_WB),
         .wdata  (rf_wdata_WB)
     );
@@ -258,7 +264,7 @@ module mycpu_top(
 
     // debug info generate
     assign debug_wb_pc       = pc_WB;
-    assign debug_wb_rf_we   = {4{rf_we_WB}};
+    assign debug_wb_rf_we   = {4{rf_we_WB & WB_valid}};
     assign debug_wb_rf_wnum  = rf_waddr_WB;
     assign debug_wb_rf_wdata = rf_wdata_WB;
 
@@ -268,13 +274,13 @@ module pre_IF(
     input  wire        clk,
     input  wire        reset, 
 
-    input  wire        br_taken,            // 跳转指令需要更新nextpc
+    input  wire        br_taken,            // 跳转指令�?要更新nextpc
     input  wire [31:0] br_target,           // 跳转地址
 
     input  wire        from_allowin,       // IF周期允许数据进入
     
     output wire        to_valid,
-    output wire [31:0] nextpc,
+    output wire [31:0] nextpc
 );
 // preIF 
     reg         valid;      // 控制信号
@@ -288,16 +294,16 @@ module pre_IF(
     end
     assign to_valid = valid;
 
-    wire [31:0] seq_pc;             // 顺序化的PC值
+    reg  [31:0] PC;              // IF级当前PC�?
+    wire [31:0] seq_pc;             // 顺序化的PC�?
     assign seq_pc       = PC + 3'h4;
     assign nextpc       = br_taken ? br_target : seq_pc;
 
-    reg  [31:0] PC;              // IF级当前PC值
     always @(posedge clk) begin
         if (reset) begin
             PC <= 32'h1bfffffc;  //trick: to make nextpc be 0x1c000000 during reset 
         end
-        else if(valid && from_allowin) begin // 当数据有效且IF允许数据进入时再修改PC值
+        else if(valid && from_allowin) begin // 当数据有效且IF允许数据进入时再修改PC�?
             PC <= nextpc; 
         end
     end    
@@ -312,20 +318,20 @@ module pipe_IF(
 
     input  wire [31:0] from_pc,
 
-    input wire         br_taken,       // 后面有跳转，当前指令和PC被取消
+    input wire         br_taken,       // 后面有跳转，当前指令和PC被取�?
     
     output wire        to_valid,       // IF数据可以发出
-    output wire        to_allowin,     // 允许preIF阶段的数据进入
+    output wire        to_allowin,     // 允许preIF阶段的数据进�?
 
-    output reg [31:0] PC,
+    output reg [31:0] PC
 ); 
 
     wire ready_go;              // 数据处理完成信号
-    assign ready_go = valid;    // 此时由于RAM一定能够在一周期内完成数据处理
+    reg valid;   
+    assign ready_go = valid;    // 此时由于RAM�?定能够在�?周期内完成数据处�?
     assign to_allowin = !valid || ready_go && from_allowin; 
     assign to_valid = valid && ready_go;
-
-    reg valid;      
+   
     always @(posedge clk) begin
         if (reset) begin
             valid <= 1'b0;
@@ -333,19 +339,19 @@ module pipe_IF(
         else if(to_allowin) begin // 如果当前阶段允许数据进入，则数据是否有效就取决于上一阶段数据是否可以发出
             valid <= from_valid;
         end
-        else if(br_taken) begin // 如果需要跳转，当前阶段数据不能在下一周期传到下一个流水线，则需要将当前的数据给无效化，但当前没有什么用，这个判断一定要放在上一个的后面
+        else if(br_taken) begin // 如果�?要跳转，当前阶段数据不能在下�?周期传到下一个流水线，则�?要将当前的数据给无效化，但当前没有什么用，这个判断一定要放在上一个的后面
             valid <= 1'b0;
         end
     end
 
-    wire data_allowin; // 拉手成功，数据可以进入
+    wire data_allowin; // 拉手成功，数据可以进�?
     assign data_valid = from_valid && to_allowin;
 
     always @(posedge clk) begin
         if (reset) begin
             PC <= 32'b0;
         end
-        else if(data_valid) begin       // 当数据有效时再传递
+        else if(data_valid) begin       // 当数据有效时再传�?
             PC <= from_pc;
         end
     end
@@ -362,7 +368,7 @@ module pipe_ID(
     input  wire [31:0] from_pc,
     input  wire [31:0] inst_sram_rdata,
 
-    input  wire [31:0] rf_rdata1,         // 读数据
+    input  wire [31:0] rf_rdata1,         // 读数�?
     input  wire [31:0] rf_rdata2,        
 
     input  wire        rf_we_EX,       // 用于读写对比
@@ -370,42 +376,46 @@ module pipe_ID(
 
     input  wire        rf_we_MEM,
     input  wire [ 4:0] rf_waddr_MEM,
+    
+    input  wire        rf_we_WB,
+    input  wire [ 4:0] rf_waddr_WB,
 
     output wire        to_valid,       // IF数据可以发出
-    output wire        to_allowin,     // 允许preIF阶段的数据进入
+    output wire        to_allowin,     // 允许preIF阶段的数据进�?
 
     output wire        br_taken,       // 跳转信号
-    output wire        br_target,      
+    output wire [31:0] br_target,      
 
-    output wire [ 4:0] raddr1,         // 读地址
-    output wire [ 4:0] raddr2,
+    output wire [ 4:0] rf_raddr1,         // 读地�?
+    output wire [ 4:0] rf_raddr2,
 
     output wire        rf_we,
     output wire [ 4:0] rf_waddr,
-    output wire        res_from_mem,   // 最后要写进寄存器的结果是否来自wire
+    output wire        res_from_mem,   // �?后要写进寄存器的结果是否来自wire
 
     output wire [11:0] alu_op,         // ALU的操作码 
-    output wire [31:0] alu_src1,       // ALU的输入          
+    output wire [31:0] alu_src1,       // ALU的输�?          
     output wire [31:0] alu_src2,
 
     output wire [3:0]  data_sram_we,
     output wire [31:0] data_sram_wdata,
     output wire        data_sram_en,
 
-    output reg  [31:0] PC,
+    output reg  [31:0] PC
 );
 
     wire ready_go;              // 数据处理完成信号
-    assign ready_go = valid && (~rw_conflict);    // 当前数据是valid并且读后写冲突完成
+    reg valid;
+    wire        rw_conflict;        // 读写冲突
+    assign ready_go = valid && (~rw_conflict);    // 当前数据是valid并且读后写冲突完�?
     assign to_allowin = !valid || ready_go && from_allowin; 
     assign to_valid = valid & ready_go;
-
-    reg valid;      
+      
     always @(posedge clk) begin
         if (reset) begin
             valid <= 1'b0;
         end
-        else if(br_taken) begin // 如果需要跳转，则从下一个阶段开始valid就需要重置为零了
+        else if(br_taken) begin // 如果�?要跳转，则从下一个阶段开始valid就需要重置为零了
             valid <= 1'b0;
         end
         else if(to_allowin) begin // 如果当前阶段允许数据进入，则数据是否有效就取决于上一阶段数据是否可以发出
@@ -413,10 +423,10 @@ module pipe_ID(
         end
     end
 
-    wire data_allowin; // 拉手成功，数据可以进入
+    wire data_allowin; // 拉手成功，数据可以进�?
     assign data_allowin = from_valid && to_allowin;
 
-    reg [31:0] inst;              // ID级当前PC值
+    reg [31:0] inst;              // ID级当前PC�?
     always @(posedge clk) begin
         if (reset) begin
             PC <= 32'b0;
@@ -429,18 +439,18 @@ module pipe_ID(
     end
 
     wire        load_op;            // load操作码，没有用到？！！！！！！！！！
-    wire        src1_is_pc;         // 源操作数1是否为PC值
+    wire        src1_is_pc;         // 源操作数1是否为PC�?
     wire        src2_is_imm;        // 源操作数2是否为立即数
     wire        dst_is_r1;          // 目的寄存器是否为r1，即link操作
-    wire        gr_we;              // 判断是否需要写寄存器
-    wire        mem_we;             // 判断是否需要写内存
+    wire        gr_we;              // 判断是否�?要写寄存�?
+    wire        mem_we;             // 判断是否�?要写内存
     wire        src_reg_is_rd;      // 判断寄存器堆第二个读地址在哪个数据段中，rd还是rk
     wire [4: 0] dest;               // 写寄存器的目的寄存器地址
     wire [31:0] rj_value;           // 寄存器堆第一个读到的数据
     wire [31:0] rkd_value;          // 寄存器堆第二个读到的数据
-    wire [31:0] imm;                // 立即数
-    wire [31:0] br_offs;            // 分支偏移量
-    wire [31:0] jirl_offs;          // 跳转偏移量，即rj_value的值加上的偏移量，用于jirl指令
+    wire [31:0] imm;                // 立即�?
+    wire [31:0] br_offs;            // 分支偏移�?
+    wire [31:0] jirl_offs;          // 跳转偏移量，即rj_value的�?�加上的偏移量，用于jirl指令
 
     wire [ 5:0] op_31_26;           // 指令的操作码分段
     wire [ 3:0] op_25_22;
@@ -459,7 +469,7 @@ module pipe_ID(
     wire [ 3:0] op_21_20_d;
     wire [31:0] op_19_15_d;
 
-    wire        inst_add_w;         // 要实现的20条指令
+    wire        inst_add_w;         // 要实现的20条指�?
     wire        inst_sub_w;
     wire        inst_slt;
     wire        inst_sltu;
@@ -480,21 +490,15 @@ module pipe_ID(
     wire        inst_bne;
     wire        inst_lu12i_w;
 
-    wire        need_ui5;           // 各类指令是否需要立即数，据此对立即数进行赋值
+    wire        need_ui5;           // 各类指令是否�?要立即数，据此对立即数进行赋�?
     wire        need_si12;
     wire        need_si16;
     wire        need_si20;
     wire        need_si26;
-    wire        src2_is_4;          // 纯粹用于保存jirl和bl指令，在寄存器中存储的PC+4所需要的立即数
+    wire        src2_is_4;          // 纯粹用于保存jirl和bl指令，在寄存器中存储的PC+4�?�?要的立即�?
 
     wire        raddr1_valid;
     wire        raddr2_valid;
-    wire        rw_conflict;        // 读写冲突
-
-    wire [ 4:0] rf_raddr1;          // 寄存器堆的读写地址
-    wire [31:0] rf_rdata1;
-    wire [ 4:0] rf_raddr2;
-    wire [31:0] rf_rdata2;
 
     assign op_31_26  = inst[31:26];
     assign op_25_22  = inst[25:22];
@@ -510,7 +514,7 @@ module pipe_ID(
     assign i16  = inst[25:10];
     assign i26  = {inst[ 9: 0], inst[25:10]};
     
-    decoder_6_64 u_dec0(.in(op_31_26 ), .out(op_31_26_d )); // 解码器
+    decoder_6_64 u_dec0(.in(op_31_26 ), .out(op_31_26_d )); // 解码�?
     decoder_4_16 u_dec1(.in(op_25_22 ), .out(op_25_22_d ));
     decoder_2_4  u_dec2(.in(op_21_20 ), .out(op_21_20_d ));
     decoder_5_32 u_dec3(.in(op_19_15 ), .out(op_19_15_d ));
@@ -562,13 +566,13 @@ module pipe_ID(
     /*need_ui5 || need_si12*/{{20{i12[11]}}, i12[11:0]} ;
     
     assign br_offs = need_si26 ? {{ 4{i26[25]}}, i26[25:0], 2'b0} :
-                                 {{14{i16[15]}}, i16[15:0], 2'b0} ; // 选择PC的偏移量，16位还是26位
+                                 {{14{i16[15]}}, i16[15:0], 2'b0} ; // 选择PC的偏移量�?16位还�?26�?
     
     assign jirl_offs = {{14{i16[15]}}, i16[15:0], 2'b0};    // 设置jirl指令的偏移量
     
     assign src_reg_is_rd = inst_beq | inst_bne | inst_st_w; // 判断寄存器堆第二个读地址在哪个数据段中，rd还是rk
     
-    assign src1_is_pc    = inst_jirl | inst_bl;         // 源操作数1是否为PC值
+    assign src1_is_pc    = inst_jirl | inst_bl;         // 源操作数1是否为PC�?
     
     assign src2_is_imm   = inst_slli_w |                // 源操作数2是否为立即数
                            inst_srli_w |
@@ -580,9 +584,9 @@ module pipe_ID(
                            inst_jirl   |
                            inst_bl     ;
      
-    assign dst_is_r1     = inst_bl;                     // link操作会将返回地址写入一号寄存器，且这个是隐含的，并不在指令中体现，因此需要特殊处理
+    assign dst_is_r1     = inst_bl;                     // link操作会将返回地址写入�?号寄存器，且这个是隐含的，并不在指令中体现，因此�?要特殊处�?
     assign gr_we         = ~inst_st_w & ~inst_beq & ~inst_bne & ~inst_b;
-    assign mem_we        = inst_st_w;                   // 判断是否需要写内存
+    assign mem_we        = inst_st_w;                   // 判断是否�?要写内存
     assign dest          = dst_is_r1 ? 5'd1 : rd;
 
     assign raddr1_valid = ~(inst_b | inst_bl | inst_lu12i_w);
@@ -604,8 +608,10 @@ module pipe_ID(
                         (
                             (rf_raddr1 == rf_waddr_EX) & rf_we_EX |
                             (rf_raddr1 == rf_waddr_MEM) & rf_we_MEM |
+                            (rf_raddr1 == rf_waddr_WB) & rf_we_WB |
                             (rf_raddr2 == rf_waddr_EX) & rf_we_EX |
-                            (rf_raddr2 == rf_waddr_MEM) & rf_we_MEM
+                            (rf_raddr2 == rf_waddr_MEM) & rf_we_MEM |
+                            (rf_raddr2 == rf_waddr_WB) & rf_we_WB 
                         );
 
     assign rj_value  = rf_rdata1;
@@ -618,18 +624,18 @@ module pipe_ID(
                        || inst_bl
                        || inst_b
                       ) && valid && ~rw_conflict;
-    assign br_target = (inst_beq || inst_bne || inst_bl || inst_b) ? (pc_ID + br_offs) :
-                                                       /*inst_jirl*/ (rj_value + jirl_offs); // 获取下一个PC值
+    assign br_target = (inst_beq || inst_bne || inst_bl || inst_b) ? (PC + br_offs) :
+                                                       /*inst_jirl*/ (rj_value + jirl_offs); // 获取下一个PC�?
     assign rf_waddr = dest;
     assign rf_we = gr_we && valid;
-    assign res_from_mem <= inst_ld_w;
+    assign res_from_mem = inst_ld_w;
 
-    assign alu_src1 = src1_is_pc  ? pc_ID[31:0] : rj_value;
+    assign alu_src1 = src1_is_pc  ? PC[31:0] : rj_value;
     assign alu_src2 = src2_is_imm ? imm : rkd_value;
 
-    assign data_sram_en_EX = valid; // 片选信号在读或者写的时候都要拉高！！！
-    assign data_sram_we_EX = {4{mem_we & valid}}; // 写使能信号在当前流水线数据有效时才被拉高
-    assign data_sram_wdata_EX = rkd_value;
+    assign data_sram_en = valid; // 片�?�信号在读或者写的时候都要拉高！！！
+    assign data_sram_we = {4{mem_we & valid}}; // 写使能信号在当前流水线数据有效时才被拉高
+    assign data_sram_wdata = rkd_value;
 
 endmodule
 
@@ -643,38 +649,38 @@ module pipe_EX(
     input  wire [31:0] from_pc, 
 
     input  wire [11:0] alu_op_ID,         // ALU的操作码 
-    input  wire [31:0] alu_src1_ID,       // ALU的输入          
+    input  wire [31:0] alu_src1_ID,       // ALU的输�?          
     input  wire [31:0] alu_src2_ID,
 
     input  wire        rf_we_ID,
     input  wire [ 4:0] rf_waddr_ID,
-    input  wire        res_from_mem_ID,   // 最后要写进寄存器的结果是否来自内存
+    input  wire        res_from_mem_ID,   // �?后要写进寄存器的结果是否来自内存
 
     input wire [3:0]  data_sram_we_ID,
     input wire [31:0] data_sram_wdata_ID,
     input wire        data_sram_en_ID,
 
     output wire        to_valid,       // IF数据可以发出
-    output wire        to_allowin,     // 允许preIF阶段的数据进入 
+    output wire        to_allowin,     // 允许preIF阶段的数据进�? 
 
     output wire [31:0] alu_result, // 用于MEM阶段计算结果
 
     output reg         rf_we,          // 用于读写对比
     output reg  [ 4:0] rf_waddr,
-    output reg         res_from_mem,   // 最后要写进寄存器的结果是否来自内存 
+    output reg         res_from_mem,   // �?后要写进寄存器的结果是否来自内存 
 
     output reg  [ 3:0] data_sram_we,
     output reg  [31:0] data_sram_wdata,
     output reg         data_sram_en,
 
-    output reg [31:0] PC,
+    output reg [31:0] PC
 );
     wire ready_go;              // 数据处理完成信号
-    assign ready_go = valid;    // 当前数据是valid并且读后写冲突完成
+    reg valid; 
+    assign ready_go = valid;    // 当前数据是valid并且读后写冲突完�?
     assign to_allowin = !valid || ready_go && from_allowin; 
     assign to_valid = valid & ready_go;
-
-    reg valid;      
+     
     always @(posedge clk) begin
         if (reset) begin
             valid <= 1'b0;
@@ -684,7 +690,7 @@ module pipe_EX(
         end
     end
 
-    wire data_allowin; // 拉手成功，数据可以进入
+    wire data_allowin; // 拉手成功，数据可以进�?
     assign data_allowin = from_valid && to_allowin;
 
     always @(posedge clk) begin
@@ -709,8 +715,8 @@ module pipe_EX(
         end
     end
 
-    reg alu_op;         // ALU的操作码
-    reg [31:0] alu_src1;       // ALU的输入
+    reg [11:0] alu_op;         // ALU的操作码
+    reg [31:0] alu_src1;       // ALU的输�?
     reg [31:0] alu_src2;
     always @(posedge clk) begin
         if (reset) begin
@@ -759,26 +765,26 @@ module pipe_MEM(
 
     input  wire        rf_we_EX,
     input  wire [ 4:0] rf_waddr_EX,
-    input  wire        res_from_mem_EX,   // 最后要写进寄存器的结果是否来自内存
+    input  wire        res_from_mem_EX,   // �?后要写进寄存器的结果是否来自内存
 
-    input  wire [31:0] data_sram_rdata,   // 读数据
+    input  wire [31:0] data_sram_rdata,   // 读数�?
 
     output wire        to_valid,       // IF数据可以发出
-    output wire        to_allowin,     // 允许preIF阶段的数据进入 
+    output wire        to_allowin,     // 允许preIF阶段的数据进�? 
 
     output reg         rf_we,          // 用于读写对比
     output reg  [ 4:0] rf_waddr,
-    output wire [31:0] rf_wdata, // 用于MEM阶段计算结
+    output wire [31:0] rf_wdata, // 用于MEM阶段计算�?
 
-    output reg [31:0]  PC,
+    output reg [31:0]  PC
 );
 
     wire ready_go;              // 数据处理完成信号
-    assign ready_go = valid;    // 当前数据是valid并且读后写冲突完成
+    reg valid;
+    assign ready_go = valid;    // 当前数据是valid并且读后写冲突完�?
     assign to_allowin = !valid || ready_go && from_allowin; 
     assign to_valid = valid & ready_go;
-
-    reg valid;      
+      
     always @(posedge clk) begin
         if (reset) begin
             valid <= 1'b0;
@@ -788,6 +794,8 @@ module pipe_MEM(
         end
     end
 
+    wire data_allowin; // 拉手成功，数据可以进�?
+    assign data_allowin = from_valid && to_allowin;
     always @(posedge clk) begin
         if (reset) begin
             PC <= 32'b0;
@@ -797,10 +805,7 @@ module pipe_MEM(
         end
     end
 
-    wire data_allowin; // 拉手成功，数据可以进入
-    assign data_allowin = from_valid && to_allowin;
-
-    wire [31:0] mem_result;         // 从内存中读出的数据
+    wire [31:0] mem_result;         // 从内存中读出的数�?
     wire [31:0] final_result;
 
     reg [31:0] alu_result;
@@ -839,22 +844,23 @@ module pipe_WB(
 
     input  wire [31:0] from_pc, 
 
-    output wire        to_allowin,     // 允许preIF阶段的数据进入 
+    output wire        to_allowin,     // 允许preIF阶段的数据进�?
+    output wire        to_valid, 
 
     input  wire        rf_we_MEM,
     input  wire [ 4:0] rf_waddr_MEM,
-    input  wire        rf_wdata_MEM,   // 最后要写进寄存器的结果是否来自内
+    input  wire [31:0] rf_wdata_MEM,   // �?后要写进寄存器的结果是否来自�?
 
     output reg         rf_we,          // 用于读写对比
     output reg  [ 4:0] rf_waddr,
-    output reg  [31:0] rf_wdata, // 用于MEM阶段计算结
+    output reg  [31:0] rf_wdata, // 用于MEM阶段计算�?
 
-    output reg [31:0]  PC,
+    output reg [31:0]  PC
 );
-
+    reg valid;
     assign to_allowin = 1'b1; 
-
-    reg valid;      
+    assign to_valid = valid;
+      
     always @(posedge clk) begin
         if (reset) begin
             valid <= 1'b0;
@@ -864,7 +870,7 @@ module pipe_WB(
         end
     end
 
-    wire data_allowin; // 拉手成功，数据可以进入
+    wire data_allowin; // 拉手成功，数据可以进�?
     assign data_allowin = from_valid && to_allowin;
 
     always @(posedge clk) begin
