@@ -3,10 +3,10 @@ module mycpu_top(
     input  wire        clk,
     input  wire        resetn,
     // inst sram interface
-    output wire [3:0]  inst_sram_we,    // RAM字节写使�?
+    output wire [3:0]  inst_sram_we,    // RAM字节写使能
     output wire [31:0] inst_sram_addr,
     output wire [31:0] inst_sram_wdata,
-    output wire        inst_sram_en,    // RAM的片选信号，高电平有�?
+    output wire        inst_sram_en,    // RAM的片选信号，高电平有效
     input  wire [31:0] inst_sram_rdata,
     // data sram interface
     output wire [3:0]  data_sram_we,
@@ -91,7 +91,7 @@ module mycpu_top(
         .nextpc       (pc_preIF_to_IF)
     );
 
-    assign inst_sram_en    = IF_allowin;
+    assign inst_sram_en    = IF_allowin; 
     assign inst_sram_we    = 4'b0;
     assign inst_sram_addr  = pc_preIF_to_IF;
     assign inst_sram_wdata = 32'b0; 
@@ -268,7 +268,7 @@ module mycpu_top(
 
     // debug info generate
     assign debug_wb_pc       = pc_WB;
-    assign debug_wb_rf_we   = {4{rf_we_WB & WB_valid}};
+    assign debug_wb_rf_we   = {4{rf_we_WB & WB_valid}}; 
     assign debug_wb_rf_wnum  = rf_waddr_WB;
     assign debug_wb_rf_wdata = rf_wdata_WB;
 
@@ -278,7 +278,7 @@ module pre_IF(
     input  wire        clk,
     input  wire        reset, 
 
-    input  wire        br_taken,            // 跳转指令�?要更新nextpc
+    input  wire        br_taken,            // 跳转信号
     input  wire [31:0] br_target,           // 跳转地址
 
     input  wire        from_allowin,       // IF周期允许数据进入
@@ -322,10 +322,10 @@ module pipe_IF(
 
     input  wire [31:0] from_pc,
 
-    input wire         br_taken,       // 后面有跳转，当前指令和PC被取�?
+    input wire         br_taken,       // 后面有跳转，当前指令和PC被取代
     
     output wire        to_valid,       // IF数据可以发出
-    output wire        to_allowin,     // 允许preIF阶段的数据进�?
+    output wire        to_allowin,     // 允许preIF阶段的数据进入?
 
     output reg [31:0] PC
 ); 
@@ -372,21 +372,21 @@ module pipe_ID(
     input  wire [31:0] from_pc,
     input  wire [31:0] inst_sram_rdata,
 
-    input  wire [31:0] rf_rdata1,         // 读数�?
+    input  wire [31:0] rf_rdata1,         // 读数据
     input  wire [31:0] rf_rdata2,        
 
     input  wire        rf_we_EX,       // 用于读写对比
     input  wire [ 4:0] rf_waddr_EX,
     input  wire        res_from_mem_EX,
-    input  wire [31:0] alu_result_EX, // 用于数据前递
+    input  wire [31:0] alu_result_EX, // EX阶段数据前递
 
     input  wire        rf_we_MEM,
     input  wire [ 4:0] rf_waddr_MEM,
-    input  wire [31:0] rf_wdata_MEM, // 用于数据前递
+    input  wire [31:0] rf_wdata_MEM, // MEM阶段用于数据前递
     
     input  wire        rf_we_WB,
     input  wire [ 4:0] rf_waddr_WB,
-    input  wire [31:0] rf_wdata_WB, // 用于数据前递
+    input  wire [31:0] rf_wdata_WB, // WB阶段用于数据前递
 
     output wire        to_valid,       // IF数据可以发出
     output wire        to_allowin,     // 允许preIF阶段的数据进�?
@@ -394,18 +394,18 @@ module pipe_ID(
     output wire        br_taken,       // 跳转信号
     output wire [31:0] br_target,      
 
-    output wire [ 4:0] rf_raddr1,         // 读地�?
+    output wire [ 4:0] rf_raddr1,         // 读地址
     output wire [ 4:0] rf_raddr2,
 
     output wire        rf_we,
     output wire [ 4:0] rf_waddr,
-    output wire        res_from_mem,   // �?后要写进寄存器的结果是否来自wire
+    output wire        res_from_mem,   // 判断要写进寄存器的结果是否来自内存
 
     output wire [11:0] alu_op,         // ALU的操作码 
-    output wire [31:0] alu_src1,       // ALU的输�?          
+    output wire [31:0] alu_src1,       // ALU的操作数          
     output wire [31:0] alu_src2,
 
-    output wire [3:0]  data_sram_we,
+    output wire [3:0]  data_sram_we,   
     output wire [31:0] data_sram_wdata,
     output wire        data_sram_en,
 
@@ -414,7 +414,7 @@ module pipe_ID(
 
     wire ready_go;              // 数据处理完成信号
     reg valid;
-    wire        rw_conflict;        // 读写冲突
+    wire rw_conflict;        // 读写冲突
     assign ready_go = valid && (~rw_conflict);    // 当前数据是valid并且读后写冲突完�?
     assign to_allowin = !valid || ready_go && from_allowin; 
     assign to_valid = valid & ready_go;
@@ -689,7 +689,7 @@ module pipe_EX(
     output reg  [31:0] data_sram_wdata,
     output reg         data_sram_en,
 
-    output reg [31:0] PC
+    output reg  [31:0] PC
 );
     wire ready_go;              // 数据处理完成信号
     reg valid; 
