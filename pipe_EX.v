@@ -38,7 +38,7 @@ module pipe_EX(
 );
     wire ready_go;              // 数据处理完成信号
     reg valid;
-    assign ready_go = valid & ~wait_div;    // 当前数据是valid并且读后写冲突完成
+    assign ready_go = valid & ~wait_div & ~(mul_en & ~mul_ready);    // 当前数据是valid并且读后写冲突完成
     assign to_allowin = !valid || ready_go && from_allowin; 
     assign to_valid = valid & ready_go;
      
@@ -92,7 +92,7 @@ module pipe_EX(
         end
     end
 
-    wire [31:0] alu_result1; // 非除法运算结果
+    wire [31:0] alu_result1; // 非除法、乘法运算结果
 
     reg  [2:0] store_op;      // 存储输入的store_op_ID
     wire [3:0] st_b_strb;    // 内存写数据字节掩码
@@ -124,12 +124,47 @@ module pipe_EX(
                           {4{store_op[0]}} & st_w_strb;
 
     alu u_alu(
-        .alu_op     (alu_op[14:0]),
+        .alu_op     (alu_op[11:0]),
         .alu_src1   (alu_src1  ),
         .alu_src2   (alu_src2  ),
         .alu_result (alu_result1)
     ); 
 
+    // 33-bit multiplier
+    wire op_mul_w; //32-bit signed multiplication
+    wire op_mulh_w; //32-bit signed multiplication
+    wire op_mulh_wu; //32-bit unsigned multiplication
+    wire mul_en;
+
+    assign op_mul_w  = alu_op[12];
+    assign op_mulh_w = alu_op[13];
+    assign op_mulh_wu = alu_op[14];
+    assign mul_en = op_mul_w | op_mulh_w | op_mulh_wu;
+
+    wire [32:0] multiplier_a;
+    wire [32:0] multiplier_b;
+    wire [65:0] multiplier_result;
+
+    reg [31:0] mul_result;
+    reg mul_ready;
+
+    assign multiplier_a = {{op_mulh_w & alu_src1[31]}, alu_src1};
+    assign multiplier_b = {{op_mulh_w & alu_src2[31]}, alu_src2};
+
+    assign multiplier_result = $signed(multiplier_a) * $signed(multiplier_b);
+    always@(posedge clk) begin // 将乘法结果写入寄存器，阻塞一拍防止时序问题
+        if (reset) begin
+            mul_result <= 66'b0;
+            mul_ready <= 1'b0;
+        end
+        else if(mul_en) begin
+            mul_result <= (op_mul_w) ? multiplier_result[31:0] : multiplier_result[63:32];
+            mul_ready <= 1'b1;
+        end
+        else
+            mul_ready <= 1'b0;
+    end
+    
     // 32-bit divider
     wire        div_en;
     wire        signed_en;
@@ -189,6 +224,7 @@ module pipe_EX(
     );
     
     assign alu_result = (
+        {32{mul_en}} & mul_result |
         {32{alu_op[15]}} & div_result_signed[63:32] |
         {32{alu_op[16]}} & div_result_signed[31:0] |
         {32{alu_op[17]}} & div_result_unsigned[63:32] |

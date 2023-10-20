@@ -1,5 +1,5 @@
 module alu(
-  input  wire [14:0] alu_op,
+  input  wire [11:0] alu_op,
   input  wire [31:0] alu_src1,
   input  wire [31:0] alu_src2,
   output wire [31:0] alu_result
@@ -17,9 +17,6 @@ wire op_sll;   //logic left shift
 wire op_srl;   //logic right shift
 wire op_sra;   //arithmetic right shift
 wire op_lui;   //Load Upper Immediate
-wire op_mul_w; //32-bit signed multiplication
-wire op_mulh_w; //32-bit signed multiplication
-wire op_mulh_wu; //32-bit unsigned multiplication
 
 // control code decomposition
 assign op_add    = alu_op[ 0];
@@ -34,9 +31,6 @@ assign op_sll    = alu_op[ 8];
 assign op_srl    = alu_op[ 9];
 assign op_sra    = alu_op[10];
 assign op_lui    = alu_op[11];
-assign op_mul_w  = alu_op[12];
-assign op_mulh_w = alu_op[13];
-assign op_mulh_wu = alu_op[14];
 
 
 wire [31:0] add_sub_result;
@@ -92,17 +86,6 @@ assign sr64_result = {{32{op_sra & alu_src1[31]}}, alu_src1[31:0]} >> alu_src2[4
 
 assign sr_result   = sr64_result[31:0];
 
-// 33-bit multiplier
-wire [32:0] multiplier_a;
-wire [32:0] multiplier_b;
-wire [65:0] multiplier_result;
-
-assign multiplier_a = {{op_mulh_w & alu_src1[31]}, alu_src1};
-assign multiplier_b = {{op_mulh_w & alu_src2[31]}, alu_src2};
-
-assign multiplier_result = $signed(multiplier_a) * $signed(multiplier_b);
-assign mul_result = (op_mul_w) ? multiplier_result[31:0] : multiplier_result[63:32];
-
 // final result mux
 assign alu_result = ({32{op_add|op_sub}} & add_sub_result)
                   | ({32{op_slt       }} & slt_result)
@@ -113,7 +96,6 @@ assign alu_result = ({32{op_add|op_sub}} & add_sub_result)
                   | ({32{op_xor       }} & xor_result)
                   | ({32{op_lui       }} & lui_result)
                   | ({32{op_sll       }} & sll_result)
-                  | ({32{op_srl|op_sra}} & sr_result)
-                  | ({32{op_mul_w| op_mulh_w| op_mulh_wu}} & mul_result);
+                  | ({32{op_srl|op_sra}} & sr_result);
 
 endmodule
