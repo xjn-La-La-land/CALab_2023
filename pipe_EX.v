@@ -8,35 +8,37 @@ module pipe_EX(
     input  wire [31:0] from_pc, 
 
     input  wire [18:0] alu_op_ID,         // ALU的操作码 
-    input  wire [31:0] alu_src1_ID,       // ALU的输�??          
+    input  wire [31:0] alu_src1_ID,       // ALU的输入         
     input  wire [31:0] alu_src2_ID,
 
     input  wire        rf_we_ID,
     input  wire [ 4:0] rf_waddr_ID,
-    input  wire        res_from_mem_ID,   // �??后要写进寄存器的结果是否来自内存
+    input  wire        res_from_mem_ID,   // 之后要写进寄存器的结果是否来自内存
 
-    input wire [3:0]  data_sram_we_ID,
-    input wire [31:0] data_sram_wdata_ID,
-    input wire        data_sram_en_ID,
+    input  wire [ 4:0] load_op_ID,
+    input  wire [ 2:0] store_op_ID,
+    input  wire        data_sram_en_ID,
+    input  wire [31:0] data_sram_wdata_ID,
 
     output wire        to_valid,       // IF数据可以发出
-    output wire        to_allowin,     // 允许preIF阶段的数据进�?? 
+    output wire        to_allowin,     // 允许preIF阶段的数据进入
 
     output wire [31:0] alu_result, // 用于MEM阶段计算结果
 
     output reg         rf_we,          // 用于读写对比
     output reg  [ 4:0] rf_waddr,
-    output reg         res_from_mem,   // �??后要写进寄存器的结果是否来自内存 
+    output reg         res_from_mem,   // 之后要写进寄存器的结果是否来自内存 
 
-    output reg  [ 3:0] data_sram_we,
-    output reg  [31:0] data_sram_wdata,
+    output reg  [ 4:0] load_op,
     output reg         data_sram_en,
+    output wire [ 3:0] data_sram_we,
+    output reg  [31:0] data_sram_wdata,
 
     output reg  [31:0] PC
 );
     wire ready_go;              // 数据处理完成信号
-    reg valid; 
-    assign ready_go = valid & ~wait_div;    // 当前数据是valid并且读后写冲突完�??
+    reg valid;
+    assign ready_go = valid & ~wait_div;    // 当前数据是valid并且读后写冲突完成
     assign to_allowin = !valid || ready_go && from_allowin; 
     assign to_valid = valid & ready_go;
      
@@ -49,7 +51,7 @@ module pipe_EX(
         end
     end
 
-    wire data_allowin; // 拉手成功，数据可以进�??
+    wire data_allowin; // 拉手成功，数据可以进入
     assign data_allowin = from_valid && to_allowin;
 
     always @(posedge clk) begin
@@ -75,7 +77,7 @@ module pipe_EX(
     end
 
     reg [18:0] alu_op;         // ALU的操作码
-    reg [31:0] alu_src1;       // ALU的输�??
+    reg [31:0] alu_src1;       // ALU的输入
     reg [31:0] alu_src2;
     always @(posedge clk) begin
         if (reset) begin
@@ -90,20 +92,37 @@ module pipe_EX(
         end
     end
 
+    wire [31:0] alu_result1; // 非除法运算结果
+
+    reg  [2:0] store_op;      // 存储输入的store_op_ID
+    wire [3:0] st_b_strb;    // 内存写数据字节掩码
+    wire [3:0] st_h_strb;
+    wire [3:0] st_w_strb;
     always @(posedge clk) begin
         if (reset) begin
-            data_sram_en <= 1'b0;
-            data_sram_we <= 4'b0;
+            load_op         <= 5'b0;
+            store_op        <= 3'b0;
+            data_sram_en    <= 1'b0;
             data_sram_wdata <= 32'b0;
         end
         else if(data_allowin) begin
-            data_sram_en <= data_sram_en_ID;
-            data_sram_we <= data_sram_we_ID;
+            load_op         <= load_op_ID;
+            store_op        <= store_op_ID;
+            data_sram_en    <= data_sram_en_ID;
             data_sram_wdata <= data_sram_wdata_ID;
         end
     end
+    assign st_b_strb = {4{alu_result1[1:0]==2'b00}} & {4'b0001} |
+                       {4{alu_result1[1:0]==2'b01}} & {4'b0010} |
+                       {4{alu_result1[1:0]==2'b10}} & {4'b0100} |
+                       {4{alu_result1[1:0]==2'b11}} & {4'b1000};
+    assign st_h_strb = {4{alu_result1[1:0]==2'b00}} & {4'b0011} |
+                       {4{alu_result1[1:0]==2'b10}} & {4'b1100};
+    assign st_w_strb = 4'b1111;
+    assign data_sram_we = {4{store_op[2]}} & st_b_strb |
+                          {4{store_op[1]}} & st_h_strb |
+                          {4{store_op[0]}} & st_w_strb;
 
-    wire [31:0] alu_result1; // 非除法运算结�?
     alu u_alu(
         .alu_op     (alu_op[14:0]),
         .alu_src1   (alu_src1  ),
