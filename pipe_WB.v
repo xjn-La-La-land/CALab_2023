@@ -6,16 +6,16 @@ module pipe_WB(
 
     input  wire [31:0] from_pc, 
 
-    output wire        to_allowin,     // 允许preIF阶段的数据进�?
+    output wire        to_allowin,     // 允许preIF阶段的数据进入
     output wire        to_valid, 
 
     input  wire        rf_we_MEM,
     input  wire [ 4:0] rf_waddr_MEM,
-    input  wire [31:0] rf_wdata_MEM,   // �?后要写进寄存器的结果是否来自�?
+    input  wire [31:0] rf_wdata_MEM,   // 之后要写进寄存器的结果是否来自�?
 
     output reg         rf_we,          // 用于读写对比
     output reg  [ 4:0] rf_waddr,
-    output reg  [31:0] rf_wdata, // 用于MEM阶段计算�?
+    output reg  [31:0] rf_wdata,       // 用于MEM阶段计算�?
 
     output reg [31:0]  PC
 );
