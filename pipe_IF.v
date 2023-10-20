@@ -34,13 +34,13 @@ module pipe_IF(
     end
 
     wire data_allowin; // 拉手成功，数据可以进�?
-    assign data_valid = from_valid && to_allowin;
+    assign data_allowin = from_valid && to_allowin;
 
     always @(posedge clk) begin
         if (reset) begin
             PC <= 32'b0;
         end
-        else if(data_valid) begin       // 当数据有效时再传�?
+        else if(data_allowin) begin       // 当数据有效时再传�?
             PC <= from_pc;
         end
     end
