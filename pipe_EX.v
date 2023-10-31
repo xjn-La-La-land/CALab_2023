@@ -8,39 +8,65 @@ module pipe_EX(
     input  wire [31:0] from_pc, 
 
     input  wire [18:0] alu_op_ID,         // ALU的操作码 
-    input  wire [31:0] alu_src1_ID,       // ALU的输入         
+    input  wire [31:0] alu_src1_ID,       // ALU的输�?         
     input  wire [31:0] alu_src2_ID,
 
     input  wire        rf_we_ID,
     input  wire [ 4:0] rf_waddr_ID,
-    input  wire        res_from_mem_ID,   // 之后要写进寄存器的结果是否来自内存
+    input  wire        res_from_mem_ID,   // 之后要写进寄存器的结果是否来自内�?
 
     input  wire [ 4:0] load_op_ID,
     input  wire [ 2:0] store_op_ID,
     input  wire        data_sram_en_ID,
     input  wire [31:0] data_sram_wdata_ID,
 
+    input  wire [13:0] csr_num_ID,
+    input  wire        csr_en_ID,
+    input  wire        csr_we_ID,
+    input  wire [31:0] csr_wmask_ID,
+    input  wire [31:0] csr_wdata_ID,
+
+    input  wire        eret_flush_ID,
+    input  wire        flush_WB,        // eret指令，清空流水线
+    input  wire        flush_MEM,
+
+    input  wire        wb_ex_ID,     // 异常信号
+    input  wire [5:0]  wb_ecode_ID,  // 异常类型�?级代�?
+    input  wire [8:0]  wb_esubcode_ID, // 异常类型二级代码
+
     output wire        to_valid,       // IF数据可以发出
-    output wire        to_allowin,     // 允许preIF阶段的数据进入
+    output wire        to_allowin,     // 允许preIF阶段的数据进�?
 
     output wire [31:0] alu_result, // 用于MEM阶段计算结果
 
     output reg         rf_we,          // 用于读写对比
     output reg  [ 4:0] rf_waddr,
-    output reg         res_from_mem,   // 之后要写进寄存器的结果是否来自内存 
+    output reg         res_from_mem,   // 之后要写进寄存器的结果是否来自内�? 
 
     output reg  [ 4:0] load_op,
     output reg         data_sram_en,
     output wire [ 3:0] data_sram_we,
     output reg  [31:0] data_sram_wdata,
 
+    output reg [13:0] csr_num,
+    output reg        csr_en,
+    output reg        csr_we,
+    output reg [31:0] csr_wmask,
+    output reg [31:0] csr_wdata,
+
+    output reg         eret_flush,        // eret指令，清空流水线
+
+    output reg         wb_ex,     // 异常信号
+    output reg  [5:0]  wb_ecode,  // 异常类型�?级代�?
+    output reg  [8:0]  wb_esubcode, // 异常类型二级代码
+
     output reg  [31:0] PC
 );
     wire ready_go;              // 数据处理完成信号
     reg valid;
-    assign ready_go = valid & ~wait_div & ~(mul_en & ~mul_ready);    // 当前数据是valid并且读后写冲突完成
+    assign ready_go = valid & ~wait_div & ~(mul_en & ~mul_ready);    // 当前数据是valid并且读后写冲突完�?
     assign to_allowin = !valid || ready_go && from_allowin; 
-    assign to_valid = valid & ready_go;
+    assign to_valid = valid & ready_go & ~flush_WB;
      
     always @(posedge clk) begin
         if (reset) begin
@@ -51,7 +77,7 @@ module pipe_EX(
         end
     end
 
-    wire data_allowin; // 拉手成功，数据可以进入
+    wire data_allowin; // 拉手成功，数据可以进�?
     assign data_allowin = from_valid && to_allowin;
 
     always @(posedge clk) begin
@@ -77,7 +103,7 @@ module pipe_EX(
     end
 
     reg [18:0] alu_op;         // ALU的操作码
-    reg [31:0] alu_src1;       // ALU的输入
+    reg [31:0] alu_src1;       // ALU的输�?
     reg [31:0] alu_src2;
     always @(posedge clk) begin
         if (reset) begin
@@ -92,10 +118,9 @@ module pipe_EX(
         end
     end
 
-    wire [31:0] alu_result1; // 非除法、乘法运算结果
-
+    wire [31:0] alu_result1; // 非除法�?�乘法运算结�?
     reg  [2:0] store_op;      // 存储输入的store_op_ID
-    wire [3:0] st_b_strb;    // 内存写数据字节掩码
+    wire [3:0] st_b_strb;    // 内存写数据字节掩�?
     wire [3:0] st_h_strb;
     wire [3:0] st_w_strb;
     always @(posedge clk) begin
@@ -112,6 +137,39 @@ module pipe_EX(
             data_sram_wdata <= data_sram_wdata_ID;
         end
     end
+
+    always @(posedge clk) begin
+        if (reset) begin
+            csr_num <= 14'b0;
+            csr_en <= 1'b0;
+            csr_we <= 1'b0;
+            csr_wmask <= 32'b0;
+            csr_wdata <= 32'b0;
+            eret_flush <= 1'b0;
+        end
+        else if(data_allowin) begin
+            csr_num <= csr_num_ID;
+            csr_en <= csr_en_ID;
+            csr_we <= csr_we_ID;
+            csr_wmask <= csr_wmask_ID;
+            csr_wdata <= csr_wdata_ID;
+            eret_flush <= eret_flush_ID;
+        end
+    end
+
+    always @(posedge clk) begin
+        if (reset) begin
+            wb_ex <= 1'b0;
+            wb_ecode <= 6'b0;
+            wb_esubcode <= 9'b0;
+        end
+        else if(data_allowin) begin
+            wb_ex <= wb_ex_ID;
+            wb_ecode <= wb_ecode_ID;
+            wb_esubcode <= wb_esubcode_ID;
+        end
+    end
+
     assign st_b_strb = {4{alu_result1[1:0]==2'b00}} & {4'b0001} |
                        {4{alu_result1[1:0]==2'b01}} & {4'b0010} |
                        {4{alu_result1[1:0]==2'b10}} & {4'b0100} |
@@ -152,7 +210,7 @@ module pipe_EX(
     assign multiplier_b = {{op_mulh_w & alu_src2[31]}, alu_src2};
 
     assign multiplier_result = $signed(multiplier_a) * $signed(multiplier_b);
-    always@(posedge clk) begin // 将乘法结果写入寄存器，阻塞一拍防止时序问题
+    always@(posedge clk) begin // 将乘法结果写入寄存器，阻塞一拍防止时序问�?
         if (reset) begin
             mul_result <= 66'b0;
             mul_ready <= 1'b0;
@@ -232,5 +290,5 @@ module pipe_EX(
         {32{~div_en}} & alu_result1
     );
     
-    assign wait_div = div_en & ~div_out_valid_signed & ~div_out_valid_unsigned;
+    assign wait_div = div_en & ~div_out_valid_signed & ~div_out_valid_unsigned & ~flush_WB;
 endmodule

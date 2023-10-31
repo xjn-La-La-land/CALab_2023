@@ -6,7 +6,7 @@ module comparator_32(
     );
 
     wire [31:0] adder_a = src1;
-    wire [31:0] adder_b = src2;
+    wire [31:0] adder_b = ~src2;
     wire        adder_cin = 1'b1;
     wire [31:0] adder_res;
     wire        adder_cout;
