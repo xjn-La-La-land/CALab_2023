@@ -165,60 +165,6 @@ end
 发信号 wb_ex 以及异常类型类型 wb_ecode、wb_esubcode 等。
 
 ### 以CSR的域为基本单位的代码实现(7.3.3.2)
-1. CRMD 的 PLV 域
-   ```
-   always @(posedge clock) begin
-    if (reset)
-        // 复位时需要将 CRMD 的 PLV 域置为全 0（最高优先级）
-        csr_crmd_plv <= 2'b0;
-    else if (wb_ex) 
-        // 异常触发时，置为最高优先级
-        sr_crmd_plv <= 2'b0;
-    else if (ertn_flush) 
-        // ERTN 指令执行时，恢复为 PRMD 的 PPLV 域的值
-        csr_crmd_plv <= csr_prmd_pplv;
-    else if (csr_we && csr_num==`CSR_CRMD)
-        // CSR 指令写 CRMD 寄存器时，根据写掩码和写数据更新 PLV 域
-        csr_crmd_plv <= csr_wmask[`CSR_CRMD_PLV] & csr_wvalue[`CSR_CRMD_PLV] | ~csr_wmask[`CSR_CRMD_PLV]&csr_crmd_plv;
-    end
-   ```
-
-2. CRMD 的 IE 域
-   ```
-   always @(posedge clock) begin
-    if (reset)
-        csr_crmd_ie <= 1'b0;
-    else if (wb_ex)
-        csr_crmd_ie <= 1'b0;
-    else if (ertn_flush)
-        csr_crmd_ie <= csr_prmd_pie;
-    else if (csr_we && csr_num==`CSR_CRMD)
-    csr_crmd_ie <= csr_wmask[`CSR_CRMD_PIE] & csr_wvalue[`CSR_CRMD_PIE] | ~csr_wmask[`CSR_CRMD_PIE] & csr_crmd_ie;
-    end
-   ```
-
-3. CRMD 的 DA、PG、DATF、DATM 域
-   由于暂未实现这些位对应的功能，直接设置成常值。
-```
-    assign csr_crmd_da = 1'b1;
-    assign csr_crmd_pg = 1'b0;
-    assign csr_crmd_datf = 2'b00;
-    assign csr_crmd_datm = 2'b00;
-```
-
-4. PRMD 的 PPLV、PIE 域
-   ```
-   always @(posedge clock) begin
-    if (wb_ex) begin
-        csr_prmd_pplv <= csr_crmd_plv;
-        csr_prmd_pie <= csr_crmd_ie;
-    end
-    else if (csr_we && csr_num==`CSR_PRMD) begin
-        csr_prmd_pplv <= csr_wmask[`CSR_PRMD_PPLV]&csr_wvalue[`CSR_PRMD_PPLV] | ~csr_wmask[`CSR_PRMD_PPLV]&csr_prmd_pplv;
-        csr_prmd_pie <= csr_wmask[`CSR_PRMD_PIE]&csr_wvalue[`CSR_PRMD_PIE] | ~csr_wmask[`CSR_PRMD_PIE]&csr_prmd_pie;
-    end
-   end
-   ```
 
 ## 处理控制状态寄存器相关引发的冲突
 对于指令导致的写后读：
@@ -257,6 +203,9 @@ end
 ## debug 问题
 1. 信号名称错位
 * 现象：对比波形的pc值保持在一个值不再变化
+  <img src = "./debug_pic_exp6/pro1_1.png" width="700x">
+  <img src = "./debug_pic_exp6/pro1_2.png" width="700x">
+  
 * 定位：查看pc的生成逻辑，发现pre-IF级的pc值在某一时刻变为不定态X，考虑pc赋值逻辑 
   ``` assign nextpc       = (ex_en) ? ex_entry : (br_taken ? br_target : seq_pc);```
   考虑可能是ex_en信号出错，发现ex_en信号出现不定态，再查看exen的赋值逻辑，发现是etrn_flush信号出现高阻态，考虑可能是etrn_flush未被正常连接。
@@ -264,8 +213,10 @@ end
  ```.eret_flush(eret_flush_EX)```
 * 修改为 ```.eret_flush(eret_flush_ID)```后，问题解决
 
-2. 跳转指令逻辑错误
+1. 跳转指令逻辑错误
 * 现象：波形停止处，pc值与金标准对应错误
+  <img src = "./debug_pic_exp6/pro2_2.png" width="700x">
+  <img src = "./debug_pic_exp6/pro2_1.png" width="700x">
 * 定位：由于译码不太可能出错，考虑可能是preIF级pc值计算错误导致，进而考虑可能是跳转指令的逻辑出错。定位到ID阶段出现错误的pc处波形，发现该错误pc值是由blt指令跳转得到，进而考虑blt指令逻辑，定位到comparator模块，发现blt指令的逻辑是错误的，
 * 原因：
     在跳转判断逻辑中，将减法转换成补码加法时未将减数逐位取反。
@@ -275,7 +226,42 @@ end
 * 修改后，问题解决
 
 3. syscall指令未清空流水级
+   <img src = "./debug_pic_exp6/pro3_2.png" width="700x">
+   <img src = "./debug_pic_exp6/pro3_1.png" width="700x">
 * 现象：波形停止处，pc值与金标准对应错误
 * 定位：观察波形得知，错误pc前一条指令是syscall指令，同时金标准对应pc值恰巧是syscall指令执行后的异常处理入口地址，考虑可能是syscall指令未清空流水级导致syscall后面的几条指令错误执行。
 * 原因：syscall指令执行后未清空流水级，清空信号 flush 仅在ertn指令执行时有效。
 * 修改：将 flush 信号在syscall指令执行，即异常出现时也置为1，问题解决。
+
+4. csr指令出现写后读错误
+* 现象：波形停止处，pc值与金标准对应错误
+   <img src = "./debug_pic_exp6/pro4_2.png" width="700x">
+   <img src = "./debug_pic_exp6/pro4_1.png" width="700x">
+* 观察波形得知，出错pc是因为跳转指令判断错误，进而考虑跳转指令读取寄存器是否正确，进而观察到前2条指令是csr的写指令，跳转指令的读地址与处于MEM阶段的csr指令的寄存器写地址 rd 冲突，导致读数据错误。
+* 原因：在csr指令实现时，使用阻塞来避免读后写冲突，本考虑复用如下原有读后写的阻塞逻辑进行实现。
+```
+assign rw_conflict = ((rf_raddr1 != 5'b0) | (rf_raddr2 != 5'b0)) 
+                        & ((rf_raddr1 == rf_waddr_EX & rf_we_EX) | (rf_raddr2 == rf_waddr_EX & rf_we_EX) ) 
+                        & *(res_from_mem_EX &csr_en_EX) 
+```
+但是此逻辑在实现时只为解决写寄存器数据来自内存的情况，因此只考虑EX阶段冲突，忽视了MEM阶段。
+* 修改：在上述代码中加入MEM阶段判断即可，WB阶段冲突直接使用前递逻辑即可（因为WB阶段的csr指令已经拿到csr寄存器中的数据可供前递了）。
+```
+    assign rw_conflict = ((rf_raddr1 != 5'b0) | (rf_raddr2 != 5'b0)) 
+                        & (((rf_raddr1 == rf_waddr_EX & rf_we_EX) | (rf_raddr2 == rf_waddr_EX & rf_we_EX) ) 
+                        & (res_from_mem_EX | csr_en_EX)
+                        | ((rf_raddr1 == rf_waddr_MEM & rf_we_MEM) | (rf_raddr2 == rf_waddr_MEM & rf_we_MEM))
+                        & csr_en_MEM);
+```
+
+5. eret 指令与 阻塞问题
+* 现象：eret指令出现后流水线一直阻塞，PC值不变
+ <img src = "./debug_pic_exp6/pro5_2.png" width="700x">  
+* 定位：考虑处理eret冲突的逻辑，发现标志 eret 指令时前面存在 csr读写指令，导致出现数据相关，因此将流水线阻塞，但是阻塞信号csr_conflict在此后一直拉高，考虑csr_conflict的赋值逻辑
+```inst_eret & (csr_we_EX | csr_we_MEM | csr_we_WB); ```
+发现是csr_we信号一直拉高导致。
+* 原因：由于csr_we信号直接采样后面流水线对应的输出信号，没有考虑此信号可能是无效数据
+```.csr_we_EX(csr_we_EX)```  
+* 修改：将上述逻辑修改为
+```.csr_we_EX(csr_we_EX & EX_valid)```
+即可

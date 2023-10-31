@@ -1,0 +1,2093 @@
+From 8188f8131173a27d1045313063fe847eb5b2327e Mon Sep 17 00:00:00 2001
+From: hanxiaofeng03218 <hanxiaofeng21@mails.uacs.ac.cn>
+Date: Sun, 29 Oct 2023 23:04:08 +0800
+Subject: [PATCH 2/2] lab6 exp12
+
+---
+ alu.v                       |  22 +--
+ comparator_32.v             |   2 +-
+ csr.v                       | 316 ++++++++++++++++++++++++++++++++++++
+ debug_exp12.md              | 281 ++++++++++++++++++++++++++++++++
+ debug_pic_exp5/error1_1.png | Bin 0 -> 102800 bytes
+ debug_pic_exp5/error1_2.png | Bin 0 -> 13188 bytes
+ debug_pic_exp5/error2_1.png | Bin 0 -> 11137 bytes
+ debug_pic_exp5/error2_2.png | Bin 0 -> 138548 bytes
+ debug_pic_exp5/error2_3.png | Bin 0 -> 24696 bytes
+ debug_pic_exp5/error2_4.png | Bin 0 -> 123166 bytes
+ debug_pic_exp5/error2_5.png | Bin 0 -> 5612 bytes
+ debug_pic_exp5/error3_1.png | Bin 0 -> 11441 bytes
+ debug_pic_exp5/error3_2.png | Bin 0 -> 16369 bytes
+ debug_pic_exp5/error3_3.png | Bin 0 -> 121658 bytes
+ debug_pic_exp5/error3_4.png | Bin 0 -> 126659 bytes
+ debug_pic_exp5/error4_1.png | Bin 0 -> 152359 bytes
+ debug_pic_exp5/error4_2.png | Bin 0 -> 151530 bytes
+ debug_pic_exp5/error4_3.png | Bin 0 -> 32592 bytes
+ debug_pic_exp5/error4_4.png | Bin 0 -> 18459 bytes
+ debug_pic_exp5/error4_5.png | Bin 0 -> 59516 bytes
+ define.v                    |  43 +++++
+ hello.v                     |   0
+ myCPU(2)/.DS_Store          | Bin 0 -> 6148 bytes
+ mycpu_top.v                 | 224 ++++++++++++++++++++++---
+ pipe_EX.v                   | 120 ++++++++++++--
+ pipe_ID.v                   | 163 ++++++++++++++-----
+ pipe_IF.v                   |  16 +-
+ pipe_MEM.v                  |  78 +++++++--
+ pipe_WB.v                   |  91 ++++++++++-
+ pre_IF.v                    |  11 +-
+ 30 files changed, 1237 insertions(+), 130 deletions(-)
+ create mode 100644 csr.v
+ create mode 100644 debug_exp12.md
+ create mode 100644 debug_pic_exp5/error1_1.png
+ create mode 100644 debug_pic_exp5/error1_2.png
+ create mode 100644 debug_pic_exp5/error2_1.png
+ create mode 100644 debug_pic_exp5/error2_2.png
+ create mode 100644 debug_pic_exp5/error2_3.png
+ create mode 100644 debug_pic_exp5/error2_4.png
+ create mode 100644 debug_pic_exp5/error2_5.png
+ create mode 100644 debug_pic_exp5/error3_1.png
+ create mode 100644 debug_pic_exp5/error3_2.png
+ create mode 100644 debug_pic_exp5/error3_3.png
+ create mode 100644 debug_pic_exp5/error3_4.png
+ create mode 100644 debug_pic_exp5/error4_1.png
+ create mode 100644 debug_pic_exp5/error4_2.png
+ create mode 100644 debug_pic_exp5/error4_3.png
+ create mode 100644 debug_pic_exp5/error4_4.png
+ create mode 100644 debug_pic_exp5/error4_5.png
+ create mode 100644 define.v
+ create mode 100644 hello.v
+ create mode 100644 myCPU(2)/.DS_Store
+
+diff --git a/alu.v b/alu.v
+index fdcf763..7fcba98 100644
+--- a/alu.v
++++ b/alu.v
+@@ -1,5 +1,5 @@
+ module alu(
+-  input  wire [14:0] alu_op,
++  input  wire [11:0] alu_op,
+   input  wire [31:0] alu_src1,
+   input  wire [31:0] alu_src2,
+   output wire [31:0] alu_result
+@@ -17,9 +17,6 @@ wire op_sll;   //logic left shift
+ wire op_srl;   //logic right shift
+ wire op_sra;   //arithmetic right shift
+ wire op_lui;   //Load Upper Immediate
+-wire op_mul_w; //32-bit signed multiplication
+-wire op_mulh_w; //32-bit signed multiplication
+-wire op_mulh_wu; //32-bit unsigned multiplication
+ 
+ // control code decomposition
+ assign op_add    = alu_op[ 0];
+@@ -34,9 +31,6 @@ assign op_sll    = alu_op[ 8];
+ assign op_srl    = alu_op[ 9];
+ assign op_sra    = alu_op[10];
+ assign op_lui    = alu_op[11];
+-assign op_mul_w  = alu_op[12];
+-assign op_mulh_w = alu_op[13];
+-assign op_mulh_wu = alu_op[14];
+ 
+ 
+ wire [31:0] add_sub_result;
+@@ -92,17 +86,6 @@ assign sr64_result = {{32{op_sra & alu_src1[31]}}, alu_src1[31:0]} >> alu_src2[4
+ 
+ assign sr_result   = sr64_result[31:0];
+ 
+-// 33-bit multiplier
+-wire [32:0] multiplier_a;
+-wire [32:0] multiplier_b;
+-wire [65:0] multiplier_result;
+-
+-assign multiplier_a = {{op_mulh_w & alu_src1[31]}, alu_src1};
+-assign multiplier_b = {{op_mulh_w & alu_src2[31]}, alu_src2};
+-
+-assign multiplier_result = $signed(multiplier_a) * $signed(multiplier_b);
+-assign mul_result = (op_mul_w) ? multiplier_result[31:0] : multiplier_result[63:32];
+-
+ // final result mux
+ assign alu_result = ({32{op_add|op_sub}} & add_sub_result)
+                   | ({32{op_slt       }} & slt_result)
+@@ -113,7 +96,6 @@ assign alu_result = ({32{op_add|op_sub}} & add_sub_result)
+                   | ({32{op_xor       }} & xor_result)
+                   | ({32{op_lui       }} & lui_result)
+                   | ({32{op_sll       }} & sll_result)
+-                  | ({32{op_srl|op_sra}} & sr_result)
+-                  | ({32{op_mul_w| op_mulh_w| op_mulh_wu}} & mul_result);
++                  | ({32{op_srl|op_sra}} & sr_result);
+ 
+ endmodule
+diff --git a/comparator_32.v b/comparator_32.v
+index 2745b10..3812ad4 100644
+--- a/comparator_32.v
++++ b/comparator_32.v
+@@ -6,7 +6,7 @@ module comparator_32(
+     );
+ 
+     wire [31:0] adder_a = src1;
+-    wire [31:0] adder_b = src2;
++    wire [31:0] adder_b = ~src2;
+     wire        adder_cin = 1'b1;
+     wire [31:0] adder_res;
+     wire        adder_cout;
+diff --git a/csr.v b/csr.v
+new file mode 100644
+index 0000000..367c1f9
+--- /dev/null
++++ b/csr.v
+@@ -0,0 +1,316 @@
++// 控制寄存器相�?
++`define CSR_CRMD 14'h0
++`define CSR_CRMD_PLV 1:0
++`define CSR_CRMD_IE 2
++
++`define CSR_PRMD 14'h1
++`define CSR_PRMD_PPLV 1:0
++`define CSR_PRMD_PIE 2
++
++`define CSR_ECFG 14'h4 
++`define CSR_ECFG_LIE 12:0
++
++`define CSR_ESTAT 14'h5 
++`define CSR_ESTAT_IS10 1:0
++
++`define CSR_ERA 14'h6
++`define CSR_ERA_PC 31:0
++
++`define CSR_BADV   14'h7
++
++`define CSR_EENTRY 14'hc
++`define CSR_EENTRY_VA 31:12
++
++`define CSR_SAVE0  14'h30
++`define CSR_SAVE1  14'h31
++`define CSR_SAVE2  14'h32
++`define CSR_SAVE3  14'h33
++`define CSR_SAVE_DATA 31:0
++
++`define CSR_TID    14'h40
++`define CSR_TID_TID 31:0
++
++`define CSR_TCFG   14'h41
++`define CSR_TCFG_EN 0
++`define CSR_TCFG_PERIOD 1
++`define CSR_TCFG_INITV 31:2
++
++`define CSR_TVAL   14'h42
++
++`define CSR_TICLR  14'h44
++
++// 异常编码相关
++`define EXC_SYS 6'h0b // 系统调用
++
++module csr(
++    // 指令访问接口
++    input         clk,
++    input         reset,
++
++    input  [13:0] csr_num,
++    input         csr_we,
++    input  [31:0] csr_wmask,
++    input  [31:0] csr_wdata,
++
++    input  [7:0]  hw_int_in,  // 硬件外部中断
++    input         ipi_int_in, // 核间中断
++
++    input         wb_ex,     // 异常信号
++    input  [5:0]  wb_ecode,  // 异常类型�?级代�?
++    input  [8:0]  wb_esubcode, // 异常类型二级代码
++    input  [31:0] wb_pc,    // 异常指令地址
++    input  [31:0] wb_vaddr, // 无效地址
++
++    input         ertn_flush, // 异常返回信号
++
++    input  [31:0] coreid_in, // 核ID
++
++    output [31:0] csr_rvalue,
++    output [31:0] ex_entry   // 异常入口地址，�?�往pre_IF阶段
++);
++
++// CRMD
++reg [1:0] csr_crmd_plv;  // 特权等级
++reg csr_crmd_ie;         // 全局中断使能
++wire csr_crmd_da;
++wire csr_crmd_pg;
++wire [1:0] csr_crmd_datf;
++wire [1:0] csr_crmd_datm;
++wire [31:0] csr_crmd_rvalue; // 用于读取
++
++always @(posedge clk) begin
++    if (reset)
++        csr_crmd_plv <= 2'b0;
++    else if (wb_ex) // 触发例外后处于最高特权等�?
++        csr_crmd_plv <= 2'b0;
++    else if (ertn_flush) // 保证从异常返回后返回原有特权等级
++        csr_crmd_plv <= csr_prmd_pplv;
++    else if (csr_we && csr_num==`CSR_CRMD) 
++        csr_crmd_plv <= csr_wmask[`CSR_CRMD_PLV] & csr_wdata[`CSR_CRMD_PLV] 
++                        | ~csr_wmask[`CSR_CRMD_PLV] & csr_crmd_plv;
++end
++
++always @(posedge clk) begin
++    if (reset)
++        csr_crmd_ie <= 1'b0;
++    else if (wb_ex) // 触发例外后关闭中�?
++        csr_crmd_ie <= 1'b0;
++    else if (ertn_flush) // 保证从异常返回后返回原有中断状�??
++        csr_crmd_ie <= csr_prmd_pie;
++    else if (csr_we && csr_num==`CSR_CRMD)
++        csr_crmd_ie <= csr_wmask[`CSR_CRMD_IE] & csr_wdata[`CSR_CRMD_IE]
++                        | ~csr_wmask[`CSR_CRMD_IE] & csr_crmd_ie;
++end
++
++    // 未实现相关域的功�?
++    assign csr_crmd_da = 1'b1;
++    assign csr_crmd_pg = 1'b0;
++    assign csr_crmd_datf = 2'b00;
++    assign csr_crmd_datm = 2'b00;
++
++    assign csr_crmd_rvalue = {23'b0, csr_crmd_datm, csr_crmd_datf, csr_crmd_pg, csr_crmd_da, csr_crmd_ie, csr_crmd_plv};
++
++    // PRMD
++    reg [1:0] csr_prmd_pplv;     // 保存中断前特权等�?
++    reg csr_prmd_pie;            // 保存中断前中断使�?
++    wire [31:0] csr_prmd_rvalue;
++
++    always @(posedge clk) begin
++        // 不需要复位时赋初始�?�，由软件人员保证访问时已赋�?
++        if (wb_ex) begin // 异常发生时保�? plv �? ie
++            csr_prmd_pplv <= csr_crmd_plv;
++            csr_prmd_pie <= csr_crmd_ie;
++        end
++        else if (csr_we && csr_num==`CSR_PRMD) begin
++            csr_prmd_pplv <= csr_wmask[`CSR_PRMD_PPLV] & csr_wdata[`CSR_PRMD_PPLV]
++                            | ~csr_wmask[`CSR_PRMD_PPLV] & csr_prmd_pplv;
++            csr_prmd_pie <= csr_wmask[`CSR_PRMD_PIE] & csr_wdata[`CSR_PRMD_PIE]
++                            | ~csr_wmask[`CSR_PRMD_PIE] & csr_prmd_pie;
++        end
++    end
++
++    assign csr_prmd_rvalue = {29'b0, csr_prmd_pie, csr_prmd_pplv};
++
++    // ECFG
++    reg  [12:0] csr_ecfg_lie; // �?部中断使能，高位有效
++    wire [31:0] csr_ecfg_rvalue;
++
++    always @(posedge clk) begin
++        if (reset)
++            csr_ecfg_lie <= 13'b0;
++        else if (csr_we && csr_num==`CSR_ECFG)
++            csr_ecfg_lie <= csr_wmask[`CSR_ECFG_LIE] & 13'h1bff & csr_wdata[`CSR_ECFG_LIE]
++                            | ~csr_wmask[`CSR_ECFG_LIE] & 13'h1bff & csr_ecfg_lie;
++    end
++
++    assign csr_ecfg_rvalue = {19'b0, csr_ecfg_lie};
++
++    // ESTAT
++    reg  [12:0] csr_estat_is;       // 中断状�?�位
++    reg  [5:0]  csr_estat_ecode;    // 异常类型�?级代�?
++    reg  [8:0]  csr_estat_esubcode; // 异常类型二级代码
++    wire [31:0] csr_estat_rvalue;
++    always @(posedge clk) begin
++        if (reset)
++            csr_estat_is[1:0] <= 2'b0;
++        else if (csr_we && csr_num==`CSR_ESTAT) // 写两个软件中�?
++            csr_estat_is[1:0] <= csr_wmask[`CSR_ESTAT_IS10] & csr_wdata[`CSR_ESTAT_IS10]
++                                | ~csr_wmask[`CSR_ESTAT_IS10] & csr_estat_is[1:0]; 
++        csr_estat_is[9:2] <= hw_int_in[7:0];    // 写外部硬件中�?
++        csr_estat_is[10] <= 1'b0;
++        csr_estat_is[11] <= 1'b0;
++//        if (csr_tcfg_e[11] && timer_cnt[31:0]==32'b0) // 写时钟中�?
++//            csr_estat_is[11] <= 1'b1;
++//        else if (csr_we && csr_num==`CSR_TICLR && csr_wmask[`CSR_TICLR_CLR] && csr_wdata[`CSR_TICLR_CLR]) // 清空时钟中断
++//            csr_estat_is[11] <= 1'b0;
++        csr_estat_is[12] <= ipi_int_in; // 核间中断
++    end
++
++    always @(posedge clk) begin
++        if (wb_ex) begin
++            csr_estat_ecode <= wb_ecode;
++            csr_estat_esubcode <= wb_esubcode;
++        end
++    end
++
++    assign csr_estat_rvalue = {1'b0, csr_estat_esubcode, csr_estat_ecode, 3'b0, csr_estat_is};
++
++    // ERA
++    reg  [31:0] csr_era_pc; // 异常返回地址
++    wire [31:0] csr_era_rvalue;
++    always @(posedge clk) begin
++        if (wb_ex) // 异常发生时保存异常指令的 pc
++            csr_era_pc <= wb_pc;
++        else if (csr_we && csr_num==`CSR_ERA) 
++            csr_era_pc <= csr_wmask[`CSR_ERA_PC] & csr_wdata[`CSR_ERA_PC]
++                          | ~csr_wmask[`CSR_ERA_PC] & csr_era_pc;
++    end
++    assign csr_era_rvalue = csr_era_pc;
++
++    // BADV
++    reg [31:0] csr_badv_vaddr;      // 无效地址
++    wire       wb_ex_addr_err;
++    wire [31:0] csr_badv_rvalue;
++
++/*-----------------------------*/
++//    assign wb_ex_addr_err = wb_ecode==`ECODE_ADE || wb_ecode==`ECODE_ALE;
++//    always @(posedge clk) begin
++//        if (wb_ex && wb_ex_addr_err) 
++//            csr_badv_vaddr <= (wb_ecode==`ECODE_ADE && wb_esubcode==`ESUBCODE_ADEF) ? wb_pc : wb_vaddr;
++//    end
++
++    assign csr_badv_rvalue = 32'b0;
++/*-----------------------------*/
++
++    // EENTRY
++    reg [19:0] csr_eentry_va; // 异常入口地址�?在页的页�?
++    wire [31:0] csr_eentry_rvalue;
++
++    always @(posedge clk) begin
++        if (csr_we && csr_num==`CSR_EENTRY) 
++            csr_eentry_va <= csr_wmask[`CSR_EENTRY_VA] & csr_wdata[`CSR_EENTRY_VA]
++                            | ~csr_wmask[`CSR_EENTRY_VA] & csr_eentry_va;
++    end
++    assign csr_eentry_rvalue = {csr_eentry_va, 12'b0};
++
++    // SAVE 
++    reg [31:0] csr_save0_data; // 保存寄存�?
++    reg [31:0] csr_save1_data;
++    reg [31:0] csr_save2_data;
++    reg [31:0] csr_save3_data;
++    always @(posedge clk) begin
++        if (csr_we && csr_num==`CSR_SAVE0)
++            csr_save0_data <= csr_wmask[`CSR_SAVE_DATA]&csr_wdata[`CSR_SAVE_DATA]
++                            | ~csr_wmask[`CSR_SAVE_DATA]&csr_save0_data;
++        if (csr_we && csr_num==`CSR_SAVE1)
++            csr_save1_data <= csr_wmask[`CSR_SAVE_DATA]&csr_wdata[`CSR_SAVE_DATA]
++                            | ~csr_wmask[`CSR_SAVE_DATA]&csr_save1_data;
++        if (csr_we && csr_num==`CSR_SAVE2)
++            csr_save2_data <= csr_wmask[`CSR_SAVE_DATA]&csr_wdata[`CSR_SAVE_DATA]
++                            | ~csr_wmask[`CSR_SAVE_DATA]&csr_save2_data;
++        if (csr_we && csr_num==`CSR_SAVE3)
++            csr_save3_data <= csr_wmask[`CSR_SAVE_DATA]&csr_wdata[`CSR_SAVE_DATA]
++                            | ~csr_wmask[`CSR_SAVE_DATA]&csr_save3_data;
++    end
++
++    /*-------------------------------------*/
++    // 下面是定时器中断相关实现，暂时不�?要，下一个实验需要补上！！！！！�?
++
++    // // TID
++    // reg [31:0] csr_tid_tid; // 定时器编�?
++    // wire [31:0] csr_tid_rvalue;
++
++    // always @(posedge clk) begin
++    //     if (reset)
++    //         csr_tid_tid <= coreid_in; // 可能是在复位阶段读取当前核的id
++    //     else if (csr_we && csr_num==`CSR_TID)
++    //         csr_tid_tid <= csr_wmask[`CSR_TID_TID] & csr_wdata[`CSR_TID_TID]
++    //                     | ~csr_wmask[`CSR_TID_TID] & csr_tid_tid;
++    // end
++    // assign csr_tid_rvalue = csr_tid_tid;
++
++    // // TCFG
++    // reg csr_tcfg_en;              // 定时器使�?
++    // reg csr_tcfg_periodic;        // 定时器循环模式控�?
++    // reg [29:0] csr_tcfg_initval;  // 定时器自减数初始值，赋�?�给计时器要低位接两�?0
++    // wire [31:0] csr_tcfg_rvalue;
++
++    // always @(posedge clk) begin
++    //     if (reset)
++    //         csr_tcfg_en <= 1'b0;
++    //     else if (csr_we && csr_num==`CSR_TCFG)
++    //         csr_tcfg_en <= csr_wmask[`CSR_TCFG_EN] & csr_wdata[`CSR_TCFG_EN]
++    //                         | ~csr_wmask[`CSR_TCFG_EN] & csr_tcfg_en;
++    //     if (csr_we && csr_num==`CSR_TCFG) begin
++    //         csr_tcfg_periodic <= csr_wmask[`CSR_TCFG_PERIOD] & csr_wdata[`CSR_TCFG_PERIOD]
++    //                         | ~csr_wmask[`CSR_TCFG_PERIOD] & csr_tcfg_periodic;
++    //         csr_tcfg_initval <= csr_wmask[`CSR_TCFG_INITV] & csr_wdata[`CSR_TCFG_INITV]
++    //                         | ~csr_wmask[`CSR_TCFG_INITV] & csr_tcfg_initval;
++    //     end
++    // end
++    // assign csr_tcfg_rvalue = {csr_tcfg_initval, csr_tcfg_periodic, csr_tcfg_en};
++
++    // // TVAL
++    // wire [31:0] tcfg_next_value;  // 下一个定时器�?
++    // wire [31:0] csr_tval;         // 当前定时器�??
++    // reg  [31:0] timer_cnt;        // 定时器计数器
++    // assign tcfg_next_value = csr_wmask[31:0] & csr_wdata[31:0] | ~csr_wmask[31:0] & csr_tcfg_rvalue;
++    // always @(posedge clk) begin
++    //     if (reset)
++    //         timer_cnt <= 32'hffffffff;
++    //     else if (csr_we && csr_num==`CSR_TCFG && tcfg_next_value[`CSR_TCFG_EN]) 
++    //         timer_cnt <= {tcfg_next_value[`CSR_TCFG_INITVAL], 2'b0};
++    //     else if (csr_tcfg_en && timer_cnt!=32'hffffffff) begin 
++    //         if (timer_cnt[31:0]==32'b0 && csr_tcfg_periodic)
++    //             timer_cnt <= {csr_tcfg_initval, 2'b0};
++    //         else
++    //             timer_cnt <= timer_cnt - 1'b1;
++    //     end
++    // end
++    // assign csr_tval = timer_cnt[31:0];
++
++    // // TICLR
++    // wire csr_ticlr_clr;
++    // assign csr_ticlr_clr = 1'b0;
++    /*-------------------------------------*/
++
++
++    // 读出数据
++    assign csr_rvalue = {32{csr_num == `CSR_CRMD}} & csr_crmd_rvalue
++                      | {32{csr_num == `CSR_PRMD}} & csr_prmd_rvalue
++                      | {32{csr_num == `CSR_ECFG}} & csr_ecfg_rvalue
++                      | {32{csr_num == `CSR_ESTAT}} & csr_estat_rvalue
++                      | {32{csr_num == `CSR_ERA}} & csr_era_rvalue
++                      | {32{csr_num == `CSR_BADV}} & csr_badv_rvalue
++                      | {32{csr_num == `CSR_EENTRY}} & csr_eentry_rvalue
++                      | {32{csr_num == `CSR_SAVE0}} & csr_save0_data
++                      | {32{csr_num == `CSR_SAVE1}} & csr_save1_data
++                      | {32{csr_num == `CSR_SAVE2}} & csr_save2_data
++                      | {32{csr_num == `CSR_SAVE3}} & csr_save3_data;
++                    //   | {32{csr_num == `CSR_TID}} & csr_tid_rvalue
++                    //   | {32{csr_num == `CSR_TCFG}} & csr_tcfg_rvalue
++                    //   | {32{csr_num == `CSR_TVAL}} & csr_tval
++                    //   | {32{csr_num == `CSR_TVAL}} & {31'b0, csr_ticlr_clr};
++    
++    assign ex_entry = ertn_flush ? csr_era_rvalue : csr_eentry_rvalue; // 异常发生时为异常入口地址，异常返回时为异常返回地�?
++    endmodule
+\ No newline at end of file
+diff --git a/debug_exp12.md b/debug_exp12.md
+new file mode 100644
+index 0000000..f95a88b
+--- /dev/null
++++ b/debug_exp12.md
+@@ -0,0 +1,281 @@
++# 实验12
++## 异常处理开始的处理工作
++1. 保存异常的类型、触发异常的指令的 PC 等供异常处理程序使用的信息。
++2. 硬件需要跳转到异常处理程序的入口执行，
++3. 保证跳转到异常入口后，处理器处于高特权等级。
++
++## 状态控制寄存器（无特殊说明均为32位）
++> CRMD、PRMD、ECFG、ESTAT、ERA、BADV、EENTRY、SAVE0~3、TID、TCFG、TVAL、TICLR
++* CRMD：决定处理器核当前所处的特权等级、全局中断使能、监视点使能、地址翻译模式
++* PRMD：当触发例外时，除特殊情况，处理器核会将CRMD中的特权等级、全局中断使能、监视点使能保存在此寄存器中，例外返回时用它来恢复现场。
++* ECFG(例外配置)：控制中断和例外的入口计算方式和各中断的局部使能位。
++* ESTAT：记录例外的状态信息，触发例外的1、2级编码，以及各中断的状态。附带**例外编码表 7.4.6**
++* ERA(例外程序返回地址)：记录例外处理后的返回地址，硬件需将触发例外的PC存在此处。
++* BADV：当触发地址错误的相关例外时，记录出错的虚地址。
++* EENTRY：用于配置处理例外和中断的入口地址。
++* SAVE0~3：用于给系统软件暂存数据，只能使用csr指令访问，这里实现4个。
++* TID(定时器编号)：处理器中的定时器均有一个编号，由软件配置在此寄存器中。
++* TCFG(定时器配置)：软件配置定时器的借口，包括：定时器使能、循环控制位（为1时定时器减到零会再次将置为初始值）、自减的初始值。
++* TVAL(定时器数值)：软件通过此寄存器读取定时器当前计数值，减为0时设置起中断信号
++* TICLR：软件通过改变此寄存器值来清除定时器置起的定时中断信号。
++  
++控制寄存器 | csr_num | 特殊位 | mask  
++:-: | :-: | :-: | :-:
++CRMD | 0x0 | PLV | 1:0
++ | | | IE | 2
++PRMD | 0x1 | PPLV | 1:0
++ | | | PIE | 2
++ECFG   | 0x4 | LIE | 12:0
++ESTAT  | 0x5 | CSR_ESTAT_IS10 | 1:0
++
++ERA    | 0x6
++BADV   | 0x7
++EENTRY | 0xc
++SAVEn  | 0x30+n
++TID    | 0x40
++TCFG   | 0x41
++TVAL   | 0x42
++TICLR  | 0x43
++
++
++
++  
++## 异常
++### 中断 INT  
++  包括 8 个硬中断、2 个软中断和 1 个定时器中断。  
++  >* 硬中断: 信号来自核外的设备或中断控制器，ESTAT 控制状态寄存器 IS域的 9..2 这八位直接对中断输入引脚的信号采样。  
++  >* 软件中断：由软件来设置的，通过 CSR 写指令对 ESTAT 状态控制寄存器 IS 域的 1..0 这两位写 1 或写 0，来完成两个软件中断的置起和撤销。
++  >* 定时器中断：记录在 ESTAT 控制状态寄存器 IS 域的第 11 位  
++  >* 局部使能：ECFG 控制寄存器的 LIE域的 11, 9..0 位
++  >* 全局使能：CRMD 控制状态寄存器的 IE位  
++
++  处理器核内部判定接收到中断的标志信号 has_int的赋值逻辑：
++  ``` 
++  assign has_int = ((csr_estat_is[12:0] & csr_ecfg_lie[12:0]) != 13'b0) && (csr_crmd_ie == 1'b1);
++  ```
++
++* 异常处理逻辑   
++将异步的中断事件动态地标记在译码级的指令上，表示这条指令的异常是中断异常，此后使用普通异常的处理模式对这条指令进行处理。
++
++### 定时器设置
++>* 定时器的软件配置集中在 TCFG（Timer Config）控制状态寄存器
++>* 定时器的时钟采用处理器核流水线的时钟
++>* 定时器当前的计数值仅可以通过读取 TVAL 状态寄存器近
++似3获得
++>* 当定时器倒计时到 0 时，硬件将 ESTAT 控制状态寄存器 IS 域的第 11 位置 1，软件通过对 TICLR 控制寄存器的 CLR 位写 1 将 ESTAT 控制状态寄存器 IS 域的第 11 位清 0。  
++
++ESTAT 控制状态寄存器 IS 域的第 11 位赋值逻辑：
++```
++always @(posedge clock) begin
++    if (csr_tcfg_en && timer_cnt[31:0]==32'b0)
++        csr_estat_is[11] <= 1'b1;
++    else if (csr_we && csr_num==`CSR_TICLR && csr_wmask[`CSR_TICLR_CLR] && csr_wvalue[`CSR_TICLR_CLR])
++    csr_estat_is[11] <= 1'b0;
++end
++```
++### 取指地址错 ADEF  
++   * 指令的 PC 违反字对齐时（地址最低两比特为全 0）将触发取指地址错误异常。
++>* 错误的 PC 值将被硬件记录在 BADV 控制状态寄存器中。
++>* 异常返回地址的 ERA 控制状态寄存器中会记录出错的 PC。不过意义不大  
++
++* 异常处理逻辑  
++在 pre-IF 级就进行这一判断，对取指所用的 PC 的最低两位进行判断，如果不是 2’b00 的话，则置起取指地址错异常标志。  
++此取指地址不应该再发起请求
++
++### 地址非对齐异常 ALE  
++   * 仅针对 load、store 这类访存指令。地址最低两位不为全 0 时，触发地址非对齐异常。
++>* 出错的访存 “虚” 地址将被硬件记录在 BADV 控制状态寄存器中
++* 异常处理逻辑 
++  在发起访存请求的 EXE 级判断，当访存地址出现非对齐情况时，则置起地址非对齐异常标志。并停止用此地址发起访存请求。
++  
++### 指令不存在异常 INE
++   当取回的指令码不属于任何一条已实现5的指令时，将触发指令不存在异常  
++   在译码阶段判断
++
++### 系统调用 SYS 和断点异常 BRK  
++   当执行 SYSCALL 指令时触发系统调用异常，当执行 BREAK 指令时触发断点异常  
++   译码时发现这两个指令就设置起异常
++
++### 响应异常后硬件的一般处理过程  
++   触发例外时：
++>* 将 CRMD 的 PLV、IE 分别保存到 PRMD 的 PPLV、PIE 中，然后将二者设置为0。
++>* 对于支持Watch指令的操作一下WE位
++>* 将触发例外指令的 PC 值记录到 ERA
++>* 跳转到例外入口取指
++
++   例外返回时：
++>* 恢复PLV、IE值
++>* 操作WE（Watch时）
++>* 跳转到ERA处取指
++
++### 实现异常处理返回指令 ERTN
++**指令手册 4.2.6.1**  
++格式：  
++位数 | 值
++  :-: | :-:
++  10-31 | 0 0 0 0 0 1 1 0 0 1 0 0 1 0 0 0 0 0 1 1 1 0
++  5-9 | 0
++  0-4 | 0
++
++### 实现 CSR 读写指令  
++
++    **指令手册 4.2.2.1**  
++    指令中的csr_num为14bit立即数，对应csr_num号寄存器，具体地址详见 **指令手册 7.1**
++* csrrd rd, csr_num  
++  将指定 CSR 的值读入 rd 中
++* csrwr rd, csr_num
++  将 rd 中的值写入指定 CSR 中, 将 CSR 的值写入 rd 中
++* csrxchg rd, rj, csr_num
++  根据rj中的掩码信息，将rd中的值写入指定CSR中。后将CSR的值写入rd中。  
++
++格式：
++  位数 | 值
++  :-: | :-:
++  24-31 | 0 0 0 0 0 1 0 0 
++  10-23 | csr_num
++  5-9 | 0，1，rj
++  0-4 |rd
++
++注：  
++1. 指令读写的所有操作均在 WB 阶段完成。将所有访问控制寄存器的指令都放在同一流水级进行处理能有效防止数据冲突。
++2. 省略掉读使能，异步读
++3. 读到的值在 WB 阶段写入 rd，遵循一般的写寄存器规定。
++   
++### 实现 ertn 指令
++* ertn 指令直到写回级才修改 CRMD，与此同时清空流水线并更新取指 PC。这也就是前面提到的 ertn_flush 信号的由来。
++* 在每一个流水级添加寄存器保存ertn_flush信号，作为ertn的标志位
++  
++
++## 精确异常的实现
++* 异常发生的判断逻辑分布在各流水级，靠近与之相关的数据通路；  
++* 发现异常后将异常信息附着在指令上沿流水线一路携带下去，直至写回级才真正报出异常，此时才会根据所携带的异常信息更新控制状态寄存器；  
++* 写回指令报出异常的同时，清空所有流水级缓存的状态，并将 nextPC 置为异常入口地址。
++* 清空流水级缓存时，对于 *store类指令* 需特殊设置判断，位于执行级的 store 指令需要检查当前访存级和写回级、以及自己上有没有已标记为异常的指令，有的话取消访问内存。
++* 每个异常单独一个标志信号的传递方式，最后在写回级编码为 Ecode 和 EsubCode 值送到 CSR 模块
++* 在支持异常处理之前，处理器流水线中在访存级和写回级是不需要保存 load、store 指令完整的虚地址的。那么此处为了正确维护 BADV 的 VAddr 域，我们就需要在执行级、访存级和写回级增加与之对应的数据通路。
++  
++## 控制状态寄存器的实现
++1. 把所有的控制状态寄存器集中到一个模块中实现，与各流水级模块处于并列地位
++2. 模块接口分为用于 **指令访问的接口** 和与 **处理器核内部硬件电路逻辑直接交互的控制、状态信号接口** 两类；
++3. 指令访问接口包含读使能（csr_re）7、寄存器号（csr_num）、寄存器读返回值（csr_rvalue）、
++写使能（csr_we）、写掩码（csr_wmask）和写数据（csr_wvalue）；
++4. 与硬件电路逻辑直接交互的接口信号视需要各自独立定义，无须再统一编码，如送往预取指
++（pre-IF）流水级的异常处理入口地址 ex_entry、送往译码流水级的中断有效信号 has_int、
++来自写回流水级的 ertn 指令执行的有效信号 ertn_flush、来自写回流水级的异常处理触
++发信号 wb_ex 以及异常类型类型 wb_ecode、wb_esubcode 等。
++
++### 以CSR的域为基本单位的代码实现(7.3.3.2)
++1. CRMD 的 PLV 域
++   ```
++   always @(posedge clock) begin
++    if (reset)
++        // 复位时需要将 CRMD 的 PLV 域置为全 0（最高优先级）
++        csr_crmd_plv <= 2'b0;
++    else if (wb_ex) 
++        // 异常触发时，置为最高优先级
++        sr_crmd_plv <= 2'b0;
++    else if (ertn_flush) 
++        // ERTN 指令执行时，恢复为 PRMD 的 PPLV 域的值
++        csr_crmd_plv <= csr_prmd_pplv;
++    else if (csr_we && csr_num==`CSR_CRMD)
++        // CSR 指令写 CRMD 寄存器时，根据写掩码和写数据更新 PLV 域
++        csr_crmd_plv <= csr_wmask[`CSR_CRMD_PLV] & csr_wvalue[`CSR_CRMD_PLV] | ~csr_wmask[`CSR_CRMD_PLV]&csr_crmd_plv;
++    end
++   ```
++
++2. CRMD 的 IE 域
++   ```
++   always @(posedge clock) begin
++    if (reset)
++        csr_crmd_ie <= 1'b0;
++    else if (wb_ex)
++        csr_crmd_ie <= 1'b0;
++    else if (ertn_flush)
++        csr_crmd_ie <= csr_prmd_pie;
++    else if (csr_we && csr_num==`CSR_CRMD)
++    csr_crmd_ie <= csr_wmask[`CSR_CRMD_PIE] & csr_wvalue[`CSR_CRMD_PIE] | ~csr_wmask[`CSR_CRMD_PIE] & csr_crmd_ie;
++    end
++   ```
++
++3. CRMD 的 DA、PG、DATF、DATM 域
++   由于暂未实现这些位对应的功能，直接设置成常值。
++```
++    assign csr_crmd_da = 1'b1;
++    assign csr_crmd_pg = 1'b0;
++    assign csr_crmd_datf = 2'b00;
++    assign csr_crmd_datm = 2'b00;
++```
++
++4. PRMD 的 PPLV、PIE 域
++   ```
++   always @(posedge clock) begin
++    if (wb_ex) begin
++        csr_prmd_pplv <= csr_crmd_plv;
++        csr_prmd_pie <= csr_crmd_ie;
++    end
++    else if (csr_we && csr_num==`CSR_PRMD) begin
++        csr_prmd_pplv <= csr_wmask[`CSR_PRMD_PPLV]&csr_wvalue[`CSR_PRMD_PPLV] | ~csr_wmask[`CSR_PRMD_PPLV]&csr_prmd_pplv;
++        csr_prmd_pie <= csr_wmask[`CSR_PRMD_PIE]&csr_wvalue[`CSR_PRMD_PIE] | ~csr_wmask[`CSR_PRMD_PIE]&csr_prmd_pie;
++    end
++   end
++   ```
++
++## 处理控制状态寄存器相关引发的冲突
++对于指令导致的写后读：
++    将所有 CSR 读写指令访问 CSR 的操作放到同一级流水线处理，即WB级
++对于如下情况  
++|写者 |相关对象 |读者| 
++|:---:|:------:|:--:|  
++|csrwr 或 csrxchg | CRMD.IE、ECFG.LIE、ECFG.IS[1:0]、TCFG.En、TICLR.CLR |译码级的指令（标记中断）
++|csrwr 或 csrxchg| ERA、PRMD.PPLV、PRMD.PIE |ertn|  
++|ertn |CRMD.IE |译码级的指令（标记中断）|
++
++前三者：  
++判断执行、访存、写回级有没有这几种情况中的写相关对象的写者，如果有就把读者阻塞在译码级且什么都不做，不要进行中断标记，不要修改取指 PC。
++
++第四个：
++由于在译码阶段才能知道这个指令是否是ertn，单此时PC取指已经读了CRMD.PLV，并可能发出取指请求了。  
++我们让 ertn 指令直到写回级才修改 CRMD，与此同时清空流水线并更新取指 PC。使用：ertn_flush 信号指示清空流水线
++
++总体解决方案：
++    译码级发现后面有csr读写指令，就使用rw_conflict信号，阻塞等待WB级完成将csr读到的结果写入寄存器。
++     
++
++## 实现其他指令
++实现三条计时器相关指令rdcntvl.w、rdcntvh.w、rdcntid。  
++>这里 rdcntvl.w 和 rdcntvh.w 两条指令分别读取计时器的低 32 位和高 32
++位值写入到第 rd 项寄存器中。  
++这里的计时器通过一个 64 位的计数器实现，复位为 0，复位结束后每个时钟周期自增 1，且该计数器软件无法修改，只能通过 rdcntvl.w 和 rdcntvh.w 指令读取。  
++它是一个独立的计数器，它不是产生定时器中断时所用的那个倒计时计数器，使用流水线时钟。  
++推荐在执行流水级读取
++
++>rdcntid 指令读取的就是 TID 控制状态寄存器中的内容。  
++将其读取 CSR 的操作推迟到写回级进行
++
++
++
++## debug 问题
++1. 信号名称错位
++* 现象：对比波形的pc值保持在一个值不再变化
++* 定位：查看pc的生成逻辑，发现pre-IF级的pc值在某一时刻变为不定态X，考虑pc赋值逻辑 
++  ``` assign nextpc       = (ex_en) ? ex_entry : (br_taken ? br_target : seq_pc);```
++  考虑可能是ex_en信号出错，发现ex_en信号出现不定态，再查看exen的赋值逻辑，发现是etrn_flush信号出现高阻态，考虑可能是etrn_flush未被正常连接。
++* 原因，在模块例化时，信号连接错误，在ID模块的输出上接入了EX级的连线，导致错误
++ ```.eret_flush(eret_flush_EX)```
++* 修改为 ```.eret_flush(eret_flush_ID)```后，问题解决
++
++2. 跳转指令逻辑错误
++* 现象：波形停止处，pc值与金标准对应错误
++* 定位：由于译码不太可能出错，考虑可能是preIF级pc值计算错误导致，进而考虑可能是跳转指令的逻辑出错。定位到ID阶段出现错误的pc处波形，发现该错误pc值是由blt指令跳转得到，进而考虑blt指令逻辑，定位到comparator模块，发现blt指令的逻辑是错误的，
++* 原因：
++    在跳转判断逻辑中，将减法转换成补码加法时未将减数逐位取反。
++  ```wire [31:0] adder_b = ~src2;
++     assign {adder_cout, adder_res} = adder_a + adder_b + adder_cin;
++  ```
++* 修改后，问题解决
++
++3. syscall指令未清空流水级
++* 现象：波形停止处，pc值与金标准对应错误
++* 定位：观察波形得知，错误pc前一条指令是syscall指令，同时金标准对应pc值恰巧是syscall指令执行后的异常处理入口地址，考虑可能是syscall指令未清空流水级导致syscall后面的几条指令错误执行。
++* 原因：syscall指令执行后未清空流水级，清空信号 flush 仅在ertn指令执行时有效。
++* 修改：将 flush 信号在syscall指令执行，即异常出现时也置为1，问题解决。
+diff --git a/define.v b/define.v
+new file mode 100644
+index 0000000..353b2cc
+--- /dev/null
++++ b/define.v
+@@ -0,0 +1,43 @@
++// 控制寄存器相关
++`define CSR_CMRD 14'b0
++`define CSR_CRMD_PLV 1:0
++`define CSR_CRMD_IE 2
++
++`define CSR_PRMD 14'b1
++`define CSR_PRMD_PPLV 1:0
++`define CSR_PRMD_PIE 2
++
++`define CSR_ECFG   0x4 
++`define CSR_ECFG_LIE 12:0
++
++`define CSR_ESTAT  0x5 
++`define CSR_ESTAT_IS10 1:0
++
++`define CSR_ERA    0x6
++`define CSR_ERA_PC 31:0
++
++`define CSR_BADV   0x7
++
++`define CSR_EENTRY 0xc
++`define CSR_EENTRY_VA 31:12
++
++`define CSR_SAVE0  0x30
++`define CSR_SAVE1  0x31
++`define CSR_SAVE2  0x32
++`define CSR_SAVE3  0x33
++`define CSR_SAVE_DATA 31:0
++
++`define CSR_TID    0x40
++`define CSR_TID_TID 31:0
++
++`define CSR_TCFG   0x41
++`define CSR_TCFG_EN 0
++`define CSR_TCFG_PERIOD 1
++`define CSR_TCFG_INITV 31:2
++
++`define CSR_TVAL   0x42
++
++`define CSR_TICLR  0x44
++
++// 异常编码相关
++`define EXC_SYS 6'h0b // 系统调用
+diff --git a/hello.v b/hello.v
+new file mode 100644
+index 0000000..e69de29
+diff --git a/myCPU(2)/.DS_Store b/myCPU(2)/.DS_Store
+new file mode 100644
+index 0000000000000000000000000000000000000000..5008ddfcf53c02e82d7eee2e57c38e5672ef89f6
+GIT binary patch
+literal 6148
+zcmeH~Jr2S!425mzP>H1@V-^m;4Wg<&0T*E43hX&L&p$$qDprKhvt+--jT7}7np#A3
+zem<@ulZcFPQ@L2!n>{z**<q8>++&mCkOWA81W14cNZ<zv;LbK1Poaz?KmsK2CSc!(
+z0ynLxE!0092;Krf2c+FF_Fe*7ECH>lEfg7;MkzE(HCqgga^y>{tEnwC%0;vJ&^%eQ
+zLs35+`xjp>T0<F0fCPF1$Cyrb|F7^5{eNG?83~ZUUlGt@xh*qZDeu<Z%US-OSsOPv
+j)R!Z4KLME7ReXlK;d!wEw5GODWMKRea10D2@KpjYNUI8I
+
+literal 0
+HcmV?d00001
+
+diff --git a/mycpu_top.v b/mycpu_top.v
+index 93a29cd..b6255ab 100644
+--- a/mycpu_top.v
++++ b/mycpu_top.v
+@@ -3,10 +3,10 @@ module mycpu_top(
+     input  wire        clk,
+     input  wire        resetn,
+     // inst sram interface
+-    output wire [3:0]  inst_sram_we,    // RAM字节写使�?
++    output wire [3:0]  inst_sram_we,    // RAM字节写使�??
+     output wire [31:0] inst_sram_addr,
+     output wire [31:0] inst_sram_wdata,
+-    output wire        inst_sram_en,    // RAM的片选信号，高电平有�?
++    output wire        inst_sram_en,    // RAM的片选信号，高电平有�??
+     input  wire [31:0] inst_sram_rdata,
+     // data sram interface
+     output wire [3:0]  data_sram_we,
+@@ -46,7 +46,7 @@ module mycpu_top(
+     wire        br_taken;      // 跳转信号
+     wire [31:0] br_target;
+ 
+-    wire [31:0] rf_rdata1;         // 读数�??
++    wire [31:0] rf_rdata1;         // 读数�???
+     wire [31:0] rf_rdata2;  
+     
+     wire        rf_we_EX;       // 用于读写对比
+@@ -61,24 +61,78 @@ module mycpu_top(
+     wire [ 4:0] rf_waddr_WB;
+     wire [31:0] rf_wdata_WB;
+ 
+-    wire [ 4:0] rf_raddr1;        // 读地�??
++    wire [ 4:0] rf_raddr1;        // 读地�???
+     wire [ 4:0] rf_raddr2;
+     wire        rf_we;
+     wire [ 4:0] rf_waddr;
+-    wire        res_from_mem;   // �??后要写进寄存器的结果是否
++    wire        res_from_mem;   // �???后要写进寄存器的结果是否
+ 
+     wire [18:0] alu_op;         // ALU的操作码 
+-    wire [31:0] alu_src1;       // ALU的输�??          
++    wire [31:0] alu_src1;       // ALU的输�???          
+     wire [31:0] alu_src2;
+ 
+     wire [ 4:0] load_op_ID;
+     wire [ 2:0] store_op;
+     wire [31:0] data_sram_wdata_ID;
+     wire        data_sram_en_ID;
++    wire        data_sram_en_EX;
+ 
+     wire [ 4:0] load_op_EX;
+     wire [31:0] alu_result;
+ 
++    // 控制寄存�?
++    wire  [13:0] csr_num_ID;
++    wire         csr_en_ID;
++    wire         csr_we_ID;
++    wire  [31:0] csr_wmask_ID;
++    wire  [31:0] csr_wdata_ID;
++    
++    wire  [13:0] csr_num_EX;
++    wire         csr_en_EX;
++    wire         csr_we_EX;
++    wire  [31:0] csr_wmask_EX;
++    wire  [31:0] csr_wdata_EX;
++
++    wire  [13:0] csr_num_MEM;
++    wire         csr_en_MEM;
++    wire         csr_we_MEM;
++    wire  [31:0] csr_wmask_MEM;
++    wire  [31:0] csr_wdata_MEM;
++
++    wire  [13:0] csr_num_WB;
++    wire         csr_we_WB;
++    wire  [31:0] csr_wmask_WB;
++    wire  [31:0] csr_wdata_WB;
++
++    // 控制寄存器读数据
++    wire   [31:0] csr_rvalue;
++
++    // eret 信号
++    wire         eret_flush_ID;
++    wire         eret_flush_EX;
++    wire         eret_flush_MEM;
++    wire         eret_flush_WB;
++
++    // 异常信号
++    wire         wb_ex_ID;     
++    wire  [5:0]  wb_ecode_ID; 
++    wire  [8:0]  wb_esubcode_ID;
++
++    wire         wb_ex_EX;     
++    wire  [5:0]  wb_ecode_EX; 
++    wire  [8:0]  wb_esubcode_EX;
++
++    wire         wb_ex_MEM;     
++    wire  [5:0]  wb_ecode_MEM; 
++    wire  [8:0]  wb_esubcode_MEM;
++
++    wire         wb_ex_WB;     
++    wire  [5:0]  wb_ecode_WB; 
++    wire  [8:0]  wb_esubcode_WB;
++
++    // 异常处理地址
++    wire  [31:0] ex_entry;
++
+ 
+     pre_IF u_pre_IF(
+         .clk          (clk),
+@@ -89,6 +143,9 @@ module mycpu_top(
+ 
+         .from_allowin (IF_allowin),
+ 
++        .ex_en(eret_flush_WB | wb_ex_WB),   // 出现异常处理信号，或者eret指令
++        .ex_entry(ex_entry),
++
+         .to_valid     (preIF_valid),
+         .nextpc       (pc_preIF_to_IF)
+     );
+@@ -109,6 +166,8 @@ module mycpu_top(
+ 
+         .br_taken     (br_taken),
+ 
++        .flush_WB (eret_flush_WB | wb_ex_WB),
++
+         .to_valid     (IF_valid),
+         .to_allowin   (IF_allowin),
+ 
+@@ -139,23 +198,31 @@ module mycpu_top(
+         
+         .rf_we_WB(rf_we_WB & WB_valid),
+         .rf_waddr_WB(rf_waddr_WB),
+-        .rf_wdata_WB(rf_wdata_WB),  // 用于数据前�??
++        .rf_wdata_WB(rf_wdata_WB),  // 用于数据前�??
++
++        .csr_en_EX(csr_en_EX & EX_valid),      // 防止csr冲突
++        .csr_en_MEM(csr_en_MEM & MEM_valid),
++        .csr_we_EX(csr_we_EX & EX_valid),      // 防止csr冲突
++        .csr_we_MEM(csr_we_MEM & MEM_valid),
++        .csr_we_WB(csr_we_WB & WB_valid),
++        
++        .flush_WB(eret_flush_WB | wb_ex_WB),
+ 
+         .to_valid(ID_valid),       // IF数据可以发出
+-        .to_allowin(ID_allowin),     // 允许preIF阶段的数据进�??
++        .to_allowin(ID_allowin),     // 允许preIF阶段的数据进�???
+ 
+         .br_taken(br_taken),       // 跳转信号
+         .br_target(br_target),    
+ 
+-        .rf_raddr1(rf_raddr1),         // 读地�??
++        .rf_raddr1(rf_raddr1),         // 读地�???
+         .rf_raddr2(rf_raddr2),
+ 
+         .rf_we(rf_we),
+         .rf_waddr(rf_waddr),
+-        .res_from_mem(res_from_mem),   // �??后要写进寄存器的结果是否来自wire
++        .res_from_mem(res_from_mem),   // �???后要写进寄存器的结果是否来自wire
+ 
+         .alu_op(alu_op),         // ALU的操作码 
+-        .alu_src1(alu_src1),       // ALU的输�??          
++        .alu_src1(alu_src1),       // ALU的输�???          
+         .alu_src2(alu_src2),
+         
+         .data_sram_en(data_sram_en_ID),
+@@ -163,6 +230,18 @@ module mycpu_top(
+         .store_op(store_op),
+         .data_sram_wdata(data_sram_wdata_ID),
+ 
++        .csr_num(csr_num_ID),
++        .csr_en(csr_en_ID),
++        .csr_we(csr_we_ID),
++        .csr_wmask(csr_wmask_ID),
++        .csr_wdata(csr_wdata_ID),
++
++        .eret_flush(eret_flush_ID),
++
++        .wb_ex(wb_ex_ID),
++        .wb_ecode(wb_ecode_ID),
++        .wb_esubcode(wb_esubcode_ID),
++
+         .PC(pc_ID_to_EX)
+     );
+ 
+@@ -176,39 +255,65 @@ module mycpu_top(
+         .from_pc(pc_ID_to_EX), 
+ 
+         .alu_op_ID(alu_op),         // ALU的操作码 
+-        .alu_src1_ID(alu_src1),       // ALU的输�??          
++        .alu_src1_ID(alu_src1),       // ALU的输�???          
+         .alu_src2_ID(alu_src2),
+ 
+         .rf_we_ID(rf_we),
+         .rf_waddr_ID(rf_waddr),
+-        .res_from_mem_ID(res_from_mem),   // �??后要写进寄存器的结果是否来自内存
++        .res_from_mem_ID(res_from_mem),   // �???后要写进寄存器的结果是否来自内存
+ 
+         .load_op_ID(load_op_ID),
+         .store_op_ID(store_op),
+         .data_sram_en_ID(data_sram_en_ID),
+         .data_sram_wdata_ID(data_sram_wdata_ID),
+ 
++        .csr_num_ID(csr_num_ID),
++        .csr_en_ID(csr_en_ID),
++        .csr_we_ID(csr_we_ID),
++        .csr_wmask_ID(csr_wmask_ID),
++        .csr_wdata_ID(csr_wdata_ID),
++        
++        .eret_flush_ID(eret_flush_ID),
++        .flush_WB(eret_flush_WB | wb_ex_WB),
++        .flush_MEM(eret_flush_MEM | wb_ex_MEM),
++        
++        .wb_ex_ID(wb_ex_ID),
++        .wb_ecode_ID(wb_ecode_ID),
++        .wb_esubcode_ID(wb_esubcode_ID),
++
+         .to_valid(EX_valid),       // IF数据可以发出
+-        .to_allowin(EX_allowin),     // 允许preIF阶段的数据进�?? 
++        .to_allowin(EX_allowin),     // 允许preIF阶段的数据进�??? 
+ 
+         .alu_result(alu_result), // 用于MEM阶段计算结果
+ 
+         .rf_we(rf_we_EX),          // 用于读写对比
+         .rf_waddr(rf_waddr_EX),
+-        .res_from_mem(res_from_mem_EX),   // �??后要写进寄存器的结果是否来自内存 
++        .res_from_mem(res_from_mem_EX),   // �???后要写进寄存器的结果是否来自内存 
+ 
+         .load_op(load_op_EX),
+-        .data_sram_en(data_sram_en),
++        .data_sram_en(data_sram_en_EX),
+         .data_sram_we(data_sram_we),
+         .data_sram_wdata(data_sram_wdata),
+ 
++        .csr_num(csr_num_EX),
++        .csr_en(csr_en_EX),
++        .csr_we(csr_we_EX),
++        .csr_wmask(csr_wmask_EX),
++        .csr_wdata(csr_wdata_EX),
++
++        .eret_flush(eret_flush_EX),
++
++        .wb_ex(wb_ex_EX),
++        .wb_ecode(wb_ecode_EX),
++        .wb_esubcode(wb_esubcode_EX),
++
+         .PC(pc_EX_to_MEM)
+     );
+ 
+     // EX
+     // assign data_sram_we   = data_sram_we_EX;
+     // assign data_sram_wdata = data_sram_wdata_EX;
+-    // assign data_sram_en   = data_sram_en_EX;
++    assign data_sram_en   = data_sram_en_EX & ~(eret_flush_MEM | wb_ex_MEM) & EX_valid; 
+     assign data_sram_addr  = {alu_result[31:2], 2'b00};
+ 
+     pipe_MEM u_pipe_MEM(
+@@ -225,16 +330,41 @@ module mycpu_top(
+ 
+         .rf_we_EX(rf_we_EX),
+         .rf_waddr_EX(rf_waddr_EX),
+-        .res_from_mem_EX(res_from_mem_EX),   // �??后要写进寄存器的结果是否来自内存
++        .res_from_mem_EX(res_from_mem_EX),   // �???后要写进寄存器的结果是否来自内存
++
++        .data_sram_rdata(data_sram_rdata),   // 读数�???
+ 
+-        .data_sram_rdata(data_sram_rdata),   // 读数�??
++        .csr_num_EX(csr_num_EX),
++        .csr_en_EX(csr_en_EX),
++        .csr_we_EX(csr_we_EX),
++        .csr_wmask_EX(csr_wmask_EX),
++        .csr_wdata_EX(csr_wdata_EX),
++
++        .eret_flush_EX(eret_flush_EX),
++        .flush_WB(eret_flush_WB | wb_ex_WB),
++
++        .wb_ex_EX(wb_ex_EX),
++        .wb_ecode_EX(wb_ecode_EX),
++        .wb_esubcode_EX(wb_esubcode_EX),
+ 
+         .to_valid(MEM_valid),       // IF数据可以发出
+-        .to_allowin(MEM_allowin),     // 允许preIF阶段的数据进�?? 
++        .to_allowin(MEM_allowin),     // 允许preIF阶段的数据进�??? 
+ 
+         .rf_we(rf_we_MEM),          // 用于读写对比
+         .rf_waddr(rf_waddr_MEM),
+-        .rf_wdata(rf_wdata), // 用于MEM阶段计算�??
++        .rf_wdata(rf_wdata), // 用于MEM阶段计算�???
++
++        .csr_num(csr_num_MEM),
++        .csr_en(csr_en_MEM),
++        .csr_we(csr_we_MEM),
++        .csr_wmask(csr_wmask_MEM),
++        .csr_wdata(csr_wdata_MEM),
++
++        .eret_flush(eret_flush_MEM),
++
++        .wb_ex(wb_ex_MEM),
++        .wb_ecode(wb_ecode_MEM),
++        .wb_esubcode(wb_esubcode_MEM),
+ 
+         .PC(pc_MEM_to_WB)
+     );
+@@ -251,12 +381,38 @@ module mycpu_top(
+ 
+         .rf_we_MEM(rf_we_MEM),
+         .rf_waddr_MEM(rf_waddr_MEM),
+-        .rf_wdata_MEM(rf_wdata),   // �??后要写进寄存器的结果是否来自�??
++        .rf_wdata_MEM(rf_wdata),   // �???后要写进寄存器的结果是否来自�???
++
++        .csr_num_MEM(csr_num_MEM),
++        .csr_en_MEM(csr_en_MEM),
++        .csr_we_MEM(csr_we_MEM),
++        .csr_wmask_MEM(csr_wmask_MEM),
++        .csr_wdata_MEM(csr_wdata_MEM),
++
++        .eret_flush_MEM(eret_flush_MEM),     
++        .csr_rvalue(csr_rvalue),
++
++        .wb_ex_MEM(wb_ex_MEM),     // 异常信号
++        .wb_ecode_MEM(wb_ecode_MEM),  // 异常类型�?级代�?
++        .wb_esubcode_MEM(wb_esubcode_MEM), // 异常类型二级代码
+ 
+         .rf_we(rf_we_WB),          
+         .rf_waddr(rf_waddr_WB),
+         .rf_wdata(rf_wdata_WB),
+ 
++        .csr_num(csr_num_WB),
++        .csr_we(csr_we_WB),
++        .csr_wmask(csr_wmask_WB),
++        .csr_wdata(csr_wdata_WB),
++
++        .eret_flush(eret_flush_WB),     // 之后要写进寄存器的结果是否来自内�?
++
++        .wb_ex(wb_ex_WB),     // 异常信号
++        .wb_ecode(wb_ecode_WB),  // 异常类型�?级代�?
++        .wb_esubcode(wb_esubcode_WB), // 异常类型二级代码
++        .wb_pc(wb_pc_WB),    // 无效指令地址
++        .wb_vaddr(wb_vaddr_WB), // 无效数据地址
++
+         .PC(pc_WB)
+     );
+ 
+@@ -271,6 +427,30 @@ module mycpu_top(
+         .wdata  (rf_wdata_WB)
+     );
+ 
++    csr u_csr( 
++        .clk(clk),
++        .reset(reset),
++
++        .csr_num(csr_num_WB),
++        .csr_we(csr_we_WB),
++        .csr_wmask(csr_wmask_WB),
++        .csr_wdata(csr_wdata_WB),
++
++        .hw_int_in(8'b0),  // 硬件外部中断    !!!!!!!!! 这里要实�?
++        .ipi_int_in(1'b0), // 核间中断  
++
++        .wb_ex(wb_ex_WB),     // 异常信号
++        .wb_ecode(wb_ecode_WB),  // 异常类型�?级代�?
++        .wb_esubcode(wb_esubcode_WB), // 异常类型二级代码
++        .wb_pc(pc_WB),    // 异常指令地址
++
++        .wb_vaddr(32'b0), // 无效数据地址          !!!!!!!!! 这里要实�?
++        .ertn_flush(eret_flush_WB), // 异常返回信号
++        .coreid_in(1'b0), // 核ID                 !!!!!!!!! 这里要实现吗�?
++
++        .csr_rvalue(csr_rvalue),
++        .ex_entry(ex_entry)   // 异常入口地址，�?�往pre_IF阶段
++    );
+ 
+     // debug info generate
+     assign debug_wb_pc       = pc_WB;
+diff --git a/pipe_EX.v b/pipe_EX.v
+index 59fd146..130c3d5 100644
+--- a/pipe_EX.v
++++ b/pipe_EX.v
+@@ -8,39 +8,65 @@ module pipe_EX(
+     input  wire [31:0] from_pc, 
+ 
+     input  wire [18:0] alu_op_ID,         // ALU的操作码 
+-    input  wire [31:0] alu_src1_ID,       // ALU的输入         
++    input  wire [31:0] alu_src1_ID,       // ALU的输�?         
+     input  wire [31:0] alu_src2_ID,
+ 
+     input  wire        rf_we_ID,
+     input  wire [ 4:0] rf_waddr_ID,
+-    input  wire        res_from_mem_ID,   // 之后要写进寄存器的结果是否来自内存
++    input  wire        res_from_mem_ID,   // 之后要写进寄存器的结果是否来自内�?
+ 
+     input  wire [ 4:0] load_op_ID,
+     input  wire [ 2:0] store_op_ID,
+     input  wire        data_sram_en_ID,
+     input  wire [31:0] data_sram_wdata_ID,
+ 
++    input  wire [13:0] csr_num_ID,
++    input  wire        csr_en_ID,
++    input  wire        csr_we_ID,
++    input  wire [31:0] csr_wmask_ID,
++    input  wire [31:0] csr_wdata_ID,
++
++    input  wire        eret_flush_ID,
++    input  wire        flush_WB,        // eret指令，清空流水线
++    input  wire        flush_MEM,
++
++    input  wire        wb_ex_ID,     // 异常信号
++    input  wire [5:0]  wb_ecode_ID,  // 异常类型�?级代�?
++    input  wire [8:0]  wb_esubcode_ID, // 异常类型二级代码
++
+     output wire        to_valid,       // IF数据可以发出
+-    output wire        to_allowin,     // 允许preIF阶段的数据进入
++    output wire        to_allowin,     // 允许preIF阶段的数据进�?
+ 
+     output wire [31:0] alu_result, // 用于MEM阶段计算结果
+ 
+     output reg         rf_we,          // 用于读写对比
+     output reg  [ 4:0] rf_waddr,
+-    output reg         res_from_mem,   // 之后要写进寄存器的结果是否来自内存 
++    output reg         res_from_mem,   // 之后要写进寄存器的结果是否来自内�? 
+ 
+     output reg  [ 4:0] load_op,
+     output reg         data_sram_en,
+     output wire [ 3:0] data_sram_we,
+     output reg  [31:0] data_sram_wdata,
+ 
++    output reg [13:0] csr_num,
++    output reg        csr_en,
++    output reg        csr_we,
++    output reg [31:0] csr_wmask,
++    output reg [31:0] csr_wdata,
++
++    output reg         eret_flush,        // eret指令，清空流水线
++
++    output reg         wb_ex,     // 异常信号
++    output reg  [5:0]  wb_ecode,  // 异常类型�?级代�?
++    output reg  [8:0]  wb_esubcode, // 异常类型二级代码
++
+     output reg  [31:0] PC
+ );
+     wire ready_go;              // 数据处理完成信号
+     reg valid;
+-    assign ready_go = valid & ~wait_div;    // 当前数据是valid并且读后写冲突完成
++    assign ready_go = valid & ~wait_div & ~(mul_en & ~mul_ready);    // 当前数据是valid并且读后写冲突完�?
+     assign to_allowin = !valid || ready_go && from_allowin; 
+-    assign to_valid = valid & ready_go;
++    assign to_valid = valid & ready_go & ~flush_WB;
+      
+     always @(posedge clk) begin
+         if (reset) begin
+@@ -51,7 +77,7 @@ module pipe_EX(
+         end
+     end
+ 
+-    wire data_allowin; // 拉手成功，数据可以进入
++    wire data_allowin; // 拉手成功，数据可以进�?
+     assign data_allowin = from_valid && to_allowin;
+ 
+     always @(posedge clk) begin
+@@ -77,7 +103,7 @@ module pipe_EX(
+     end
+ 
+     reg [18:0] alu_op;         // ALU的操作码
+-    reg [31:0] alu_src1;       // ALU的输入
++    reg [31:0] alu_src1;       // ALU的输�?
+     reg [31:0] alu_src2;
+     always @(posedge clk) begin
+         if (reset) begin
+@@ -92,10 +118,9 @@ module pipe_EX(
+         end
+     end
+ 
+-    wire [31:0] alu_result1; // 非除法运算结果
+-
++    wire [31:0] alu_result1; // 非除法�?�乘法运算结�?
+     reg  [2:0] store_op;      // 存储输入的store_op_ID
+-    wire [3:0] st_b_strb;    // 内存写数据字节掩码
++    wire [3:0] st_b_strb;    // 内存写数据字节掩�?
+     wire [3:0] st_h_strb;
+     wire [3:0] st_w_strb;
+     always @(posedge clk) begin
+@@ -112,6 +137,39 @@ module pipe_EX(
+             data_sram_wdata <= data_sram_wdata_ID;
+         end
+     end
++
++    always @(posedge clk) begin
++        if (reset) begin
++            csr_num <= 14'b0;
++            csr_en <= 1'b0;
++            csr_we <= 1'b0;
++            csr_wmask <= 32'b0;
++            csr_wdata <= 32'b0;
++            eret_flush <= 1'b0;
++        end
++        else if(data_allowin) begin
++            csr_num <= csr_num_ID;
++            csr_en <= csr_en_ID;
++            csr_we <= csr_we_ID;
++            csr_wmask <= csr_wmask_ID;
++            csr_wdata <= csr_wdata_ID;
++            eret_flush <= eret_flush_ID;
++        end
++    end
++
++    always @(posedge clk) begin
++        if (reset) begin
++            wb_ex <= 1'b0;
++            wb_ecode <= 6'b0;
++            wb_esubcode <= 9'b0;
++        end
++        else if(data_allowin) begin
++            wb_ex <= wb_ex_ID;
++            wb_ecode <= wb_ecode_ID;
++            wb_esubcode <= wb_esubcode_ID;
++        end
++    end
++
+     assign st_b_strb = {4{alu_result1[1:0]==2'b00}} & {4'b0001} |
+                        {4{alu_result1[1:0]==2'b01}} & {4'b0010} |
+                        {4{alu_result1[1:0]==2'b10}} & {4'b0100} |
+@@ -124,12 +182,47 @@ module pipe_EX(
+                           {4{store_op[0]}} & st_w_strb;
+ 
+     alu u_alu(
+-        .alu_op     (alu_op[14:0]),
++        .alu_op     (alu_op[11:0]),
+         .alu_src1   (alu_src1  ),
+         .alu_src2   (alu_src2  ),
+         .alu_result (alu_result1)
+     ); 
+ 
++    // 33-bit multiplier
++    wire op_mul_w; //32-bit signed multiplication
++    wire op_mulh_w; //32-bit signed multiplication
++    wire op_mulh_wu; //32-bit unsigned multiplication
++    wire mul_en;
++
++    assign op_mul_w  = alu_op[12];
++    assign op_mulh_w = alu_op[13];
++    assign op_mulh_wu = alu_op[14];
++    assign mul_en = op_mul_w | op_mulh_w | op_mulh_wu;
++
++    wire [32:0] multiplier_a;
++    wire [32:0] multiplier_b;
++    wire [65:0] multiplier_result;
++
++    reg [31:0] mul_result;
++    reg mul_ready;
++
++    assign multiplier_a = {{op_mulh_w & alu_src1[31]}, alu_src1};
++    assign multiplier_b = {{op_mulh_w & alu_src2[31]}, alu_src2};
++
++    assign multiplier_result = $signed(multiplier_a) * $signed(multiplier_b);
++    always@(posedge clk) begin // 将乘法结果写入寄存器，阻塞一拍防止时序问�?
++        if (reset) begin
++            mul_result <= 66'b0;
++            mul_ready <= 1'b0;
++        end
++        else if(mul_en) begin
++            mul_result <= (op_mul_w) ? multiplier_result[31:0] : multiplier_result[63:32];
++            mul_ready <= 1'b1;
++        end
++        else
++            mul_ready <= 1'b0;
++    end
++    
+     // 32-bit divider
+     wire        div_en;
+     wire        signed_en;
+@@ -189,6 +282,7 @@ module pipe_EX(
+     );
+     
+     assign alu_result = (
++        {32{mul_en}} & mul_result |
+         {32{alu_op[15]}} & div_result_signed[63:32] |
+         {32{alu_op[16]}} & div_result_signed[31:0] |
+         {32{alu_op[17]}} & div_result_unsigned[63:32] |
+@@ -196,5 +290,5 @@ module pipe_EX(
+         {32{~div_en}} & alu_result1
+     );
+     
+-    assign wait_div = div_en & ~div_out_valid_signed & ~div_out_valid_unsigned;
++    assign wait_div = div_en & ~div_out_valid_signed & ~div_out_valid_unsigned & ~flush_WB;
+ endmodule
+\ No newline at end of file
+diff --git a/pipe_ID.v b/pipe_ID.v
+index 206e38d..1238e3b 100644
+--- a/pipe_ID.v
++++ b/pipe_ID.v
+@@ -1,3 +1,6 @@
++// 异常编码相关
++`define EXC_SYS 6'h0b // 系统调用
++
+ module pipe_ID(
+     input  wire        clk,
+     input  wire        reset, 
+@@ -8,60 +11,83 @@ module pipe_ID(
+     input  wire [31:0] from_pc,
+     input  wire [31:0] inst_sram_rdata,
+ 
+-    input  wire [31:0] rf_rdata1,         // 读数据
++    input  wire [31:0] rf_rdata1,         // 读数�?
+     input  wire [31:0] rf_rdata2,        
+ 
+     input  wire        rf_we_EX,       // 用于读写对比
+     input  wire [ 4:0] rf_waddr_EX,
+     input  wire        res_from_mem_EX,  // load阻塞
+-    input  wire [31:0] alu_result_EX, // EX阶段数据前递
+-
++    input  wire [31:0] alu_result_EX, // EX阶段数据前�??
+ 
+     input  wire        rf_we_MEM,
+     input  wire [ 4:0] rf_waddr_MEM,
+-    input  wire [31:0] rf_wdata_MEM, // MEM阶段用于数据前递
++    input  wire [31:0] rf_wdata_MEM, // MEM阶段用于数据前�??
+     
+     input  wire        rf_we_WB,
+     input  wire [ 4:0] rf_waddr_WB,
+-    input  wire [31:0] rf_wdata_WB, // WB阶段用于数据前递
++    input  wire [31:0] rf_wdata_WB, // WB阶段用于数据前�??
++
++    input  wire        csr_en_EX,
++    input  wire        csr_en_MEM,
++    input  wire        csr_we_EX,
++    input  wire        csr_we_MEM,
++    input  wire        csr_we_WB,
++    
++    input  wire        flush_WB,        // eret指令，清空流水线
+ 
+     output wire        to_valid,       // IF数据可以发出
+-    output wire        to_allowin,     // 允许preIF阶段的数据进入
++    output wire        to_allowin,     // 允许preIF阶段的数据进�?
+ 
+     output wire        br_taken,       // 跳转信号
+     output wire [31:0] br_target,      
+ 
+-    output wire [ 4:0] rf_raddr1,         // 读地址
++    output wire [ 4:0] rf_raddr1,         // 读地�?
+     output wire [ 4:0] rf_raddr2,
+ 
+     output wire        rf_we,
+     output wire [ 4:0] rf_waddr,
+-    output wire        res_from_mem,   // 判断要写进寄存器的结果是否来自内存
++    output wire        res_from_mem,   // 判断要写进寄存器的结果是否来自内�?
+ 
+     output wire [18:0] alu_op,         // ALU的操作码 
+     output wire [31:0] alu_src1,       // ALU的操作数          
+     output wire [31:0] alu_src2,
+ 
+     output wire        data_sram_en,
+-    output wire [ 4:0] load_op,         // load操作码
+-    output wire [ 2:0] store_op,        // store操作码
++    output wire [ 4:0] load_op,         // load操作�?
++    output wire [ 2:0] store_op,        // store操作�?
+     output wire [31:0] data_sram_wdata,
+ 
++    // 控制寄存�?
++    output  [13:0] csr_num,
++    output         csr_en,
++    output         csr_we,
++    output  [31:0] csr_wmask,
++    output  [31:0] csr_wdata,
++
++    // eret 信号
++    output         eret_flush,
++
++    // 异常信号
++    input         wb_ex,     // 异常信号
++    input  [5:0]  wb_ecode,  // 异常类型�?级代�?
++    input  [8:0]  wb_esubcode, // 异常类型二级代码
++
+     output reg  [31:0] PC
+ );
+ 
+     wire ready_go;              // 数据处理完成信号
+     reg  valid;
+     wire rw_conflict;        // 读写冲突
+-    assign ready_go = valid && (~rw_conflict);    // 当前数据是valid并且读后写冲突处理完成
++    wire csr_conflict;       // csr冲突(表格中的前三种情�?)
++    assign ready_go = valid && (~rw_conflict) && (~csr_conflict);    // 当前数据是valid并且读后写冲突处理完�?
+     assign to_allowin = !valid || ready_go && from_allowin;
+-    assign to_valid = valid & ready_go;
++    assign to_valid = valid & ready_go & ~flush_WB;
+       
+     always @(posedge clk) begin
+         if (reset) begin
+             valid <= 1'b0;
+         end
+-        else if(br_taken) begin // 如果需要跳转，则从下一个阶段开始valid就需要重置为零了
++        else if(br_taken) begin // 如果�?要跳转，则从下一个阶段开始valid就需要重置为零了
+             valid <= 1'b0;
+         end
+         else if(to_allowin) begin // 如果当前阶段允许数据进入，则数据是否有效就取决于上一阶段数据是否可以发出
+@@ -69,10 +95,10 @@ module pipe_ID(
+         end
+     end
+ 
+-    wire data_allowin; // 拉手成功，数据可以进入
++    wire data_allowin; // 拉手成功，数据可以进�?
+     assign data_allowin = from_valid && to_allowin;
+ 
+-    reg [31:0] inst;              // ID级当前PC�??
++    reg [31:0] inst;              // ID级当前PC�???
+     always @(posedge clk) begin
+         if (reset) begin
+             PC <= 32'b0;
+@@ -87,15 +113,15 @@ module pipe_ID(
+     wire        src1_is_pc;         // 源操作数1是否为PC
+     wire        src2_is_imm;        // 源操作数2是否为立即数
+     wire        dst_is_r1;          // 目的寄存器是否为r1，即link操作
+-    wire        gr_we;              // 判断是否需要写寄存器
++    wire        gr_we;              // 判断是否�?要写寄存�?
+     wire        src_reg_is_rd;      // 判断寄存器堆第二个读地址在哪个数据段中，rd还是rk
+ 
+     wire [4: 0] dest;               // 写寄存器的目的寄存器地址
+     wire [31:0] rj_value;           // 寄存器堆第一个读到的数据
+     wire [31:0] rkd_value;          // 寄存器堆第二个读到的数据
+-    wire [31:0] imm;                // 立即数
+-    wire [31:0] br_offs;            // 分支偏移量
+-    wire [31:0] jirl_offs;          // 跳转偏移量，即rj_value的值加上的偏移量，用于jirl指令
++    wire [31:0] imm;                // 立即�?
++    wire [31:0] br_offs;            // 分支偏移�?
++    wire [31:0] jirl_offs;          // 跳转偏移量，即rj_value的�?�加上的偏移量，用于jirl指令
+ 
+     wire        rj_eq_rd;           // rj_value == rkd_value
+     wire        rj_lt_ltu_rd;       // rj_value <signed rkd_value / rj_value <unsigned rkd_value
+@@ -117,9 +143,9 @@ module pipe_ID(
+     wire [ 3:0] op_21_20_d;
+     wire [31:0] op_19_15_d;
+ 
+-// 各条指令的译码识别信号
++// 各条指令的译码识别信�?
+ /*-------------------------------------------------------------------------------------------------------------*/
+-// 算数运算类指令?(在EXE阶段计算)            指令格式                            操作
++// 算数运算类指�??(在EXE阶段计算)            指令格式                            操作
+ wire        inst_add_w;   /*           add.w rd, rj, rk               GR[rd] = GR[rj] + GR[rk]        */
+ wire        inst_sub_w;   /*           sub.w rd, rj, rk               GR[rd] = GR[rj] - GR[rk]        */
+ wire        inst_addi_w;  /*           addi.w rd, rj, si12            GR[rd] = GR[rj] + sext32(si12)  */
+@@ -136,7 +162,7 @@ wire        inst_div_wu;  /*           div.wu rd, rj, rk              GR[rd] = (
+ wire        inst_mod_w;   /*           mod.w rd, rj, rk               GR[rd] = (signed)(GR[rj] % GR[rk])       */
+ wire        inst_mod_wu;  /*           mod.wu rd, rj, rk              GR[rd] = (unsigned)(GR[rj] % GR[rk])     */
+ /*-------------------------------------------------------------------------------------------------------------*/
+-// 逻辑运算类指令?(在EXE阶段计算)
++// 逻辑运算类指�??(在EXE阶段计算)
+ wire        inst_and;     /*           and rd, rj, rk                 GR[rd] = GR[rj] & GR[rk]        */
+ wire        inst_or;      /*           or rd, rj, rk                  GR[rd] = GR[rj] | GR[rk]        */
+ wire        inst_nor;     /*           nor rd, rj, rk                 GR[rd] = ~(GR[rj] | GR[rk])     */
+@@ -153,19 +179,19 @@ wire        inst_slli_w;  /*           slli.w rd, rj, ui5             GR[rd] = G
+ wire        inst_srli_w;  /*           srli.w rd, rj, ui5             GR[rd] = GR[rj] >>logic ui5     */
+ wire        inst_srai_w;  /*           srai.w rd, rj, ui5             GR[rd] = GR[rj] >>arith ui5     */
+ /*-------------------------------------------------------------------------------------------------------------*/
+-// load类指令 TgtAddr = GR[rj]+sext32(si12)
++// load类指�? TgtAddr = GR[rj]+sext32(si12)
+ wire        inst_ld_b;    /*           ld.b rd, rj, si12              byte = MemoryLoad(TgtAddr, BYTE); GR[rd]=sext32(byte) */
+ wire        inst_ld_h;    /*           ld.h rd, rj, si12              halfword = MemoryLoad(TgtAddr, HALFWORD); GR[rd]=sext32(halfword) */
+ wire        inst_ld_w;    /*           ld.w rd, rj, si12              GR[rd] = MEM[TgtAddr][31:0]     */
+ wire        inst_ld_bu;   /*           ld.bu rd, rj, si12             byte = MemoryLoad(TgtAddr, BYTE); GR[rd]=zext32(byte) */
+ wire        inst_ld_hu;   /*           ld.hu rd, rj, si12             halfword = MemoryLoad(TgtAddr, HALFWORD); GR[rd]=zext32(halfword) */
+ /*-------------------------------------------------------------------------------------------------------------*/
+-// store类指令 TgtAddr = GR[rj]+sext32(si12)
++// store类指�? TgtAddr = GR[rj]+sext32(si12)
+ wire        inst_st_b;    /*           st.b rd, rj, si12              MemoryStore(GR[rd][7:0], TgtAddr, BYTE) */
+ wire        inst_st_h;    /*           st.h rd, rj, si12              MemoryStore(GR[rd][15:0]. TgtAddr, HALFBYTE) */
+ wire        inst_st_w;    /*           st.w rd, rj, si12              MEM[TgtAddr][31:0] = GR[rd] */
+ /*-------------------------------------------------------------------------------------------------------------*/
+-// 无条件间接跳转
++// 无条件间接跳�?
+ wire        inst_jirl;    /*           jirl rd, rj, offs16            GR[rd] = PC+4; PC = GR[rj]+sext32({offs16, 2’b0}) */
+ /*-------------------------------------------------------------------------------------------------------------*/
+ // 无条件相对PC跳转; BrTarget = PC + sext32({offs26, 2’b0})
+@@ -180,18 +206,30 @@ wire        inst_bge;     /*           bge rj, rd, offs16             if (GR[rj]
+ wire        inst_bltu;    /*           bltu rj, rd, offs16            if (GR[rj] <unsigned GR[rd]): PC = TakenTgt */
+ wire        inst_bgeu;    /*           bgeu rj, rd, offs16            if (GR[rj] >=unsigned GR[rd]): PC = TakenTgt */
+ /*-------------------------------------------------------------------------------------------------------------*/
+-// 立即数装载
++// 立即数装�?
+ wire        inst_lu12i_w; /*           lu12i rd, si20                 GR[rd] = {si20, 12’b0}           */
++/*-------------------------------------------------------------------------------------------------------------*/
++// 状�?�控制器读写
++wire        inst_csr;
++wire        inst_csrrd;   /*           csrrd rd, csr_num              GR[rd] = CSR[csr_num]           */
++wire        inst_csrwr;   /*           csrwr rd, csr_num              CSR[csr_num] = GR[rj], GR[rj] = CSR[csr_num] */
++wire        inst_csrxchg; /*           csrxchg rd, rj, csr_num        CSR[csr_num] = GR[rj] & GR[rd], GR[rd] = CSR[csr_num]*/
++/*-------------------------------------------------------------------------------------------------------------*/
++// 异常返回指令
++wire        inst_eret;    /*           eret                                                                  */
++/*-------------------------------------------------------------------------------------------------------------*/
++// 软件中断指令
++wire        inst_syscall; /*           syscall code                                                              */
+ 
+ 
+ 
+-    wire        need_ui5;           // 各类指令是否需要立即数，据此对立即数进行赋值
++    wire        need_ui5;           // 各类指令是否�?要立即数，据此对立即数进行赋�?
+     wire        need_si12;
+     wire        need_ui12;
+     wire        need_si16;
+     wire        need_si20;
+     wire        need_si26;
+-    wire        src2_is_4;          // 纯粹用于保存jirl和bl指令，在寄存器中存储的PC+4�??�??要的立即�??
++    wire        src2_is_4;          // 纯粹用于保存jirl和bl指令，在寄存器中存储的PC+4�???�???要的立即�???
+ 
+     wire        raddr1_valid;
+     wire        raddr2_valid;
+@@ -210,7 +248,7 @@ wire        inst_lu12i_w; /*           lu12i rd, si20                 GR[rd] = {
+     assign i16  = inst[25:10];
+     assign i26  = {inst[ 9: 0], inst[25:10]};
+     
+-    decoder_6_64 u_dec0(.in(op_31_26 ), .out(op_31_26_d )); // 解码器
++    decoder_6_64 u_dec0(.in(op_31_26 ), .out(op_31_26_d )); // 解码�?
+     decoder_4_16 u_dec1(.in(op_25_22 ), .out(op_25_22_d ));
+     decoder_2_4  u_dec2(.in(op_21_20 ), .out(op_21_20_d ));
+     decoder_5_32 u_dec3(.in(op_19_15 ), .out(op_19_15_d ));
+@@ -260,12 +298,18 @@ wire        inst_lu12i_w; /*           lu12i rd, si20                 GR[rd] = {
+     assign inst_div_w       = op_31_26_d[6'h00] & op_25_22_d[4'h0] & op_21_20_d[2'h2] & op_19_15_d[5'h00];
+     assign inst_mod_w       = op_31_26_d[6'h00] & op_25_22_d[4'h0] & op_21_20_d[2'h2] & op_19_15_d[5'h01];
+     assign inst_div_wu      = op_31_26_d[6'h00] & op_25_22_d[4'h0] & op_21_20_d[2'h2] & op_19_15_d[5'h02];
+-    assign inst_mod_wu      = op_31_26_d[6'h00] & op_25_22_d[4'h0] & op_21_20_d[2'h2] & op_19_15_d[5'h03];
+-    
++    assign inst_mod_wu      = op_31_26_d[ 6'h00] & op_25_22_d[4'h0] & op_21_20_d[2'h2] & op_19_15_d[5'h03];
++    assign inst_csr         = op_31_26_d[6'h01] & ~inst_eret;
++    assign inst_csrrd       = inst_csr & (rj == 5'b0);
++    assign inst_csrwr       = inst_csr & (rj == 5'b1);
++    assign inst_csrxchg     = inst_csr & ~(inst_csrrd | inst_csrwr);
++    assign inst_eret        = op_31_26_d[6'h01] & op_25_22_d[4'h9] & op_21_20_d[2'h0] & op_19_15_d[5'h10] & (rk == 5'h0e) & (rj == 5'h00) & (rd == 5'h00);
++    assign inst_syscall     = op_31_26_d[6'h00] & op_25_22_d[4'h0] & op_21_20_d[2'h2] & op_19_15_d[5'h16];
++
+     assign alu_op[ 0] = inst_add_w | inst_addi_w | inst_pcaddu12i | 
+                         inst_ld_w | inst_ld_b | inst_ld_bu | inst_ld_h | inst_ld_hu |
+                         inst_st_w | inst_st_b | inst_st_h |
+-                        inst_jirl | inst_bl;
++                        inst_jirl | inst_bl | inst_csr;
+     assign alu_op[ 1] = inst_sub_w;
+     assign alu_op[ 2] = inst_slt | inst_slti;
+     assign alu_op[ 3] = inst_sltu | inst_sltui;
+@@ -301,12 +345,12 @@ wire        inst_lu12i_w; /*           lu12i rd, si20                 GR[rd] = {
+     /*need_ui5 || need_si12*/{{20{i12[11]}}, i12[11:0]} ;
+     
+     assign br_offs = need_si26 ? {{ 4{i26[25]}}, i26[25:0], 2'b0} :
+-                                 {{14{i16[15]}}, i16[15:0], 2'b0} ; // 选择PC的偏移量是16位还是26位
++                                 {{14{i16[15]}}, i16[15:0], 2'b0} ; // 选择PC的偏移量�?16位还�?26�?
+     // 设置jirl指令的偏移量
+     assign jirl_offs = {{14{i16[15]}}, i16[15:0], 2'b0};
+     // 判断寄存器堆第二个读地址在哪个数据段中，rd还是rk
+     assign src_reg_is_rd = inst_beq | inst_bne | inst_blt | inst_bge | inst_bltu | inst_bgeu |
+-                           inst_st_b | inst_st_h | inst_st_w;
++                           inst_st_b | inst_st_h | inst_st_w | inst_csrwr | inst_csrxchg;
+     // 源操作数1是否为PC
+     assign src1_is_pc    = inst_jirl | inst_bl | inst_pcaddu12i;
+     // 源操作数2是否为立即数
+@@ -320,9 +364,9 @@ wire        inst_lu12i_w; /*           lu12i rd, si20                 GR[rd] = {
+                            inst_bl     |
+                            inst_slti   | inst_sltui | inst_andi | inst_ori | inst_xori;
+      
+-    assign dst_is_r1     = inst_bl;                     // link操作会将返回地址写入1号寄存器，且这个是隐含的，并不在指令中体现，因此需要特殊处理
++    assign dst_is_r1     = inst_bl;                     // link操作会将返回地址写入1号寄存器，且这个是隐含的，并不在指令中体现，因此�?要特殊处�?
+     assign gr_we         = ~(inst_st_w | inst_st_b | inst_st_h |
+-                             inst_beq | inst_bne | inst_blt | inst_bge | inst_bltu | inst_bgeu | inst_b); // 判断是否需要写回寄存器
++                             inst_beq | inst_bne | inst_blt | inst_bge | inst_bltu | inst_bgeu | inst_b | inst_eret); // 判断是否�?要写回寄存器
+     assign dest          = dst_is_r1 ? 5'd1 : rd;
+ 
+     assign raddr1_valid = ~(inst_b | inst_bl | inst_lu12i_w | inst_pcaddu12i);
+@@ -341,11 +385,12 @@ wire        inst_lu12i_w; /*           lu12i rd, si20                 GR[rd] = {
+     assign rf_raddr2 = {5{raddr2_valid}} & (src_reg_is_rd ? rd :rk);
+ 
+     assign rw_conflict = ((rf_raddr1 != 5'b0) | (rf_raddr2 != 5'b0)) 
+-                        & ((rf_raddr1 == rf_waddr_EX & rf_we_EX) | (rf_raddr2 == rf_waddr_EX & rf_we_EX) ) 
+-                        & res_from_mem_EX; 
+-                        // 当当前指令的读数据需要等待从内存中读取时，阻塞一拍
+-                        // 当当前指令写数据�?要等待div算出结果�?
+-
++                        & (((rf_raddr1 == rf_waddr_EX & rf_we_EX) | (rf_raddr2 == rf_waddr_EX & rf_we_EX) ) 
++                        & (res_from_mem_EX | csr_en_EX)
++                        | ((rf_raddr1 == rf_waddr_MEM & rf_we_MEM) | (rf_raddr2 == rf_waddr_MEM & rf_we_MEM))
++                        & csr_en_MEM);
++                        // 当当前指令的读数据需要等待从内存中读取时，阻塞一�?
++                        // 当前指令�?要等待读csr寄存器的结果返回
+ 
+     assign rj_value  = {32{(rf_raddr1 != 5'b0)}} &
+                     (
+@@ -353,7 +398,7 @@ wire        inst_lu12i_w; /*           lu12i rd, si20                 GR[rd] = {
+                         : ((rf_raddr1 == rf_waddr_MEM) & rf_we_MEM) ? rf_wdata_MEM
+                         : ((rf_raddr1 == rf_waddr_WB) & rf_we_WB) ? rf_wdata_WB
+                         : rf_rdata1
+-                    );  //数据前递逻辑
++                    );  //数据前�?��?�辑
+ 
+     assign rkd_value = {32{(rf_raddr2 != 5'b0)}} &
+                     (
+@@ -389,12 +434,40 @@ wire        inst_lu12i_w; /*           lu12i rd, si20                 GR[rd] = {
+     assign load_op      = {inst_ld_b, inst_ld_bu, inst_ld_h, inst_ld_hu, inst_ld_w};
+     assign store_op     = {inst_st_b, inst_st_h, inst_st_w};
+ 
+-    assign alu_src1 = src1_is_pc  ? PC[31:0] : rj_value;
++    assign alu_src1 = src1_is_pc ? PC[31:0] : rj_value;
+     assign alu_src2 = src2_is_imm ? imm : rkd_value;
+ 
+-    assign data_sram_en = valid; // 片选信号在读或者写的时候都要拉高！！！
+-    assign data_sram_wdata = inst_st_b? {4{rkd_value[ 7:0]}} :    // 写数据的有效字节/半字在低位
++    assign data_sram_en = valid; // 片�?�信号在读或者写的时候都要拉高！！！
++    assign data_sram_wdata = inst_st_b? {4{rkd_value[ 7:0]}} :    // 写数据的有效字节/半字在低�?
+                              inst_st_h? {2{rkd_value[15:0]}} :
+                                         rkd_value;
+ 
++    // 控制寄存器�?�辑
++    assign csr_num = inst[23:10];
++    assign csr_wdata = rkd_value;
++    assign csr_en = inst_csr;
++    assign csr_we = inst_csrwr | inst_csrxchg;
++    assign csr_wmask = (inst_csrxchg)? rj_value : 32'hffffffff;
++
++    /*--------------------------------------------------------------*/
++    // !!!!!!!! 此处�?要添加第�?行和第三行的两个关于中断的冲突判�?
++    assign csr_conflict = inst_eret & (csr_we_EX | csr_we_MEM | csr_we_WB); 
++    /*--------------------------------------------------------------*/
++                        
++    // eret指令逻辑
++    assign eret_flush = inst_eret;
++
++    // 异常信号逻辑
++    /*--------------------------------------------------------------*/
++    // !!!!!!!! 此处�?要添加关于异常信号的逻辑，包括异常和中断
++    assign wb_ex = inst_syscall;
++    assign wb_ecode = inst_syscall ? `EXC_SYS : 6'h0;
++    assign wb_esubcode = 9'h0;
++    /*--------------------------------------------------------------*/
++    
++
++    
++
++
++
+ endmodule
+\ No newline at end of file
+diff --git a/pipe_IF.v b/pipe_IF.v
+index 93b53d7..ab88bbe 100644
+--- a/pipe_IF.v
++++ b/pipe_IF.v
+@@ -7,19 +7,21 @@ module pipe_IF(
+ 
+     input  wire [31:0] from_pc,
+ 
+-    input wire         br_taken,       // 后面有跳转，当前指令和PC被取代
++    input wire         br_taken,       // 后面有跳转，当前指令和PC被取�?
++
++    input  wire        flush_WB,        // eret指令，清空流水线
+     
+     output wire        to_valid,       // IF数据可以发出
+-    output wire        to_allowin,     // 允许preIF阶段的数据进入?
++    output wire        to_allowin,     // 允许preIF阶段的数据进�??
+ 
+     output reg [31:0] PC
+ ); 
+ 
+     wire ready_go;              // 数据处理完成信号
+     reg valid;   
+-    assign ready_go = valid;    // 此时由于RAM�?定能够在�?周期内完成数据处�?
++    assign ready_go = valid;    // 此时由于RAM�??定能够在�??周期内完成数据处�??
+     assign to_allowin = !valid || ready_go && from_allowin; 
+-    assign to_valid = valid && ready_go;
++    assign to_valid = valid && ready_go && ~flush_WB;
+    
+     always @(posedge clk) begin
+         if (reset) begin
+@@ -28,19 +30,19 @@ module pipe_IF(
+         else if(to_allowin) begin // 如果当前阶段允许数据进入，则数据是否有效就取决于上一阶段数据是否可以发出
+             valid <= from_valid;
+         end
+-        else if(br_taken) begin // 如果�?要跳转，当前阶段数据不能在下�?周期传到下一个流水线，则�?要将当前的数据给无效化，但当前没有什么用，这个判断一定要放在上一个的后面
++        else if(br_taken) begin // 如果�??要跳转，当前阶段数据不能在下�??周期传到下一个流水线，则�??要将当前的数据给无效化，但当前没有什么用，这个判断一定要放在上一个的后面
+             valid <= 1'b0;
+         end
+     end
+ 
+-    wire data_allowin; // 拉手成功，数据可以进�?
++    wire data_allowin; // 拉手成功，数据可以进�??
+     assign data_allowin = from_valid && to_allowin;
+ 
+     always @(posedge clk) begin
+         if (reset) begin
+             PC <= 32'b0;
+         end
+-        else if(data_allowin) begin       // 当数据有效时再传�?
++        else if(data_allowin) begin       // 当数据有效时再传�??
+             PC <= from_pc;
+         end
+     end
+diff --git a/pipe_MEM.v b/pipe_MEM.v
+index 160b0a1..03f989c 100644
+--- a/pipe_MEM.v
++++ b/pipe_MEM.v
+@@ -6,30 +6,55 @@ module pipe_MEM(
+     input  wire        from_valid,     // preIF数据可以发出
+ 
+     input  wire [31:0] from_pc, 
+-    input  wire [ 4:0] load_op_EX,    // 用与MEM阶段处理内存读数据
++    input  wire [ 4:0] load_op_EX,    // 用与MEM阶段处理内存读数�?
+     input  wire [31:0] alu_result_EX, // 用于MEM阶段计算结果
+ 
+     input  wire        rf_we_EX,
+     input  wire [ 4:0] rf_waddr_EX,
+-    input  wire        res_from_mem_EX,   // 之后要写进寄存器的结果是否来自内存
++    input  wire        res_from_mem_EX,   // 之后要写进寄存器的结果是否来自内�?
+ 
+-    input  wire [31:0] data_sram_rdata,   // 读数据
++    input  wire [31:0] data_sram_rdata,   // 读数�?
++
++    input  wire [13:0] csr_num_EX,
++    input  wire        csr_en_EX,
++    input  wire        csr_we_EX,
++    input  wire [31:0] csr_wmask_EX,
++    input  wire [31:0] csr_wdata_EX,
++
++    input  wire        eret_flush_EX,        // eret指令向后推�??
++    input  wire        flush_WB,        // eret指令，清空流水线
++
++    input  wire        wb_ex_EX,     // 异常信号
++    input  wire [5:0]  wb_ecode_EX,  // 异常类型�?级代�?
++    input  wire [8:0]  wb_esubcode_EX, // 异常类型二级代码
+ 
+     output wire        to_valid,       // IF数据可以发出
+-    output wire        to_allowin,     // 允许preIF阶段的数据进入 
++    output wire        to_allowin,     // 允许preIF阶段的数据进�? 
+ 
+     output reg         rf_we,           // 用于读写对比
+     output reg  [ 4:0] rf_waddr,
+-    output wire [31:0] rf_wdata,        // 用于MEM阶段计算�?
++    output wire [31:0] rf_wdata,        // 用于MEM阶段计算�??
++
++    output reg [13:0] csr_num,
++    output reg        csr_en,
++    output reg        csr_we,
++    output reg [31:0] csr_wmask,
++    output reg [31:0] csr_wdata,
++
++    output  reg        eret_flush,   // 之后要写进寄存器的结果是否来自内�?
++
++    output reg         wb_ex,     // 异常信号
++    output reg  [5:0]  wb_ecode,  // 异常类型�?级代�?
++    output reg  [8:0]  wb_esubcode, // 异常类型二级代码
+ 
+     output reg [31:0]  PC
+ );
+ 
+     wire ready_go;              // 数据处理完成信号
+     reg valid;
+-    assign ready_go = valid;    // 当前数据是valid并且读后写冲突完�?
++    assign ready_go = valid;    // 当前数据是valid并且读后写冲突完�??
+     assign to_allowin = !valid || ready_go && from_allowin; 
+-    assign to_valid = valid & ready_go;
++    assign to_valid = valid & ready_go & ~flush_WB;
+       
+     always @(posedge clk) begin
+         if (reset) begin
+@@ -40,7 +65,7 @@ module pipe_MEM(
+         end
+     end
+ 
+-    wire data_allowin; // 拉手成功，数据可以进�?
++    wire data_allowin; // 拉手成功，数据可以进�??
+     assign data_allowin = from_valid && to_allowin;
+     always @(posedge clk) begin
+         if (reset) begin
+@@ -53,7 +78,7 @@ module pipe_MEM(
+ 
+     wire [ 7:0] mem_byte;
+     wire [15:0] mem_halfword;
+-    wire [31:0] mem_result;         // 从内存中读出的数据
++    wire [31:0] mem_result;         // 从内存中读出的数�?
+     wire [31:0] final_result;
+     
+     reg  [ 4:0] load_op;
+@@ -83,6 +108,38 @@ module pipe_MEM(
+         end
+     end
+ 
++    always @(posedge clk) begin
++        if (reset) begin
++            csr_num <= 14'b0;
++            csr_en <= 1'b0;
++            csr_we <= 1'b0;
++            csr_wmask <= 32'b0;
++            csr_wdata <= 32'b0;
++            eret_flush <= 1'b0;
++        end
++        else if(data_allowin) begin
++            csr_num <= csr_num_EX;
++            csr_en <= csr_en_EX;
++            csr_we <= csr_we_EX;
++            csr_wmask <= csr_wmask_EX;
++            csr_wdata <= csr_wdata_EX;
++            eret_flush <= eret_flush_EX;
++        end
++    end
++
++    always @(posedge clk) begin
++        if (reset) begin
++            wb_ex <= 1'b0;
++            wb_ecode <= 6'b0;
++            wb_esubcode <= 9'b0;
++        end
++        else if(data_allowin) begin
++            wb_ex <= wb_ex_EX;
++            wb_ecode <= wb_ecode_EX;
++            wb_esubcode <= wb_esubcode_EX;
++        end
++    end
++
+     assign mem_byte     = {8{alu_result[1:0]==2'b00}} & data_sram_rdata[ 7: 0] |
+                           {8{alu_result[1:0]==2'b01}} & data_sram_rdata[15: 8] |
+                           {8{alu_result[1:0]==2'b10}} & data_sram_rdata[23:16] |
+@@ -97,4 +154,5 @@ module pipe_MEM(
+                           {32{load_op[0]}} & data_sram_rdata;                 // ld.w
+ 
+     assign rf_wdata = res_from_mem ? mem_result : alu_result;
+-endmodule
+\ No newline at end of file
++endmodule
++
+diff --git a/pipe_WB.v b/pipe_WB.v
+index 92db5e2..bae8763 100644
+--- a/pipe_WB.v
++++ b/pipe_WB.v
+@@ -6,16 +6,43 @@ module pipe_WB(
+ 
+     input  wire [31:0] from_pc, 
+ 
+-    output wire        to_allowin,     // 允许preIF阶段的数据进入
++    output wire        to_allowin,     // 允许preIF阶段的数据进�?
+     output wire        to_valid, 
+ 
+     input  wire        rf_we_MEM,
+     input  wire [ 4:0] rf_waddr_MEM,
+     input  wire [31:0] rf_wdata_MEM,   // 之后要写进寄存器的结果是否来自�?
+ 
+-    output reg         rf_we,          // 用于读写对比
+-    output reg  [ 4:0] rf_waddr,
+-    output reg  [31:0] rf_wdata,       // 用于MEM阶段计算�?
++    input  wire [13:0] csr_num_MEM,
++    input  wire        csr_en_MEM,
++    input  wire        csr_we_MEM,
++    input  wire [31:0] csr_wmask_MEM,
++    input  wire [31:0] csr_wdata_MEM,
++
++    input  wire        eret_flush_MEM,  
++       
++    input  wire [31:0] csr_rvalue,
++
++    input  wire        wb_ex_MEM,     // 异常信号
++    input  wire [5:0]  wb_ecode_MEM,  // 异常类型�?级代�?
++    input  wire [8:0]  wb_esubcode_MEM, // 异常类型二级代码
++
++    output reg          rf_we,          // 用于读写对比
++    output reg   [ 4:0] rf_waddr,//!!!!!!!!!!!!!
++    output wire  [31:0] rf_wdata,       // 用于MEM阶段计算�??
++
++    output reg [13:0] csr_num,
++    output wire       csr_we,
++    output reg [31:0] csr_wmask,
++    output reg [31:0] csr_wdata,
++
++    output wire       eret_flush,     // 之后要写进寄存器的结果是否来自内�?
++
++    output wire       wb_ex,     // 异常信号
++    output reg [5:0]  wb_ecode,  // 异常类型�?级代�?
++    output reg [8:0]  wb_esubcode, // 异常类型二级代码
++    output reg [31:0] wb_pc,    // 无效指令地址
++    output reg [31:0] wb_vaddr, // 无效数据地址
+ 
+     output reg [31:0]  PC
+ );
+@@ -32,7 +59,7 @@ module pipe_WB(
+         end
+     end
+ 
+-    wire data_allowin; // 拉手成功，数据可以进�?
++    wire data_allowin; // 拉手成功，数据可以进�??
+     assign data_allowin = from_valid && to_allowin;
+ 
+     always @(posedge clk) begin
+@@ -44,17 +71,65 @@ module pipe_WB(
+         end
+     end
+ 
+-    reg res_from_mem;
++    reg [31:0] rf_wdata1; // 未�?�虑csr读数的情�?
+     always @(posedge clk) begin
+         if (reset) begin
+             rf_waddr <= 5'b0;
+             rf_we <= 1'b0;
+-            rf_wdata <= 31'b0;
++            rf_wdata1 <= 31'b0;
+         end
+         else if(data_allowin) begin
+             rf_waddr <= rf_waddr_MEM;
+             rf_we <= rf_we_MEM;
+-            rf_wdata <= rf_wdata_MEM;
++            rf_wdata1 <= rf_wdata_MEM;
+         end
+     end
++
++    reg csr_en;
++    reg csr_we_WB;
++    reg eret_flush_WB;
++    always @(posedge clk) begin
++        if (reset) begin
++            csr_num <= 14'b0;
++            csr_en <= 1'b0;
++            csr_we_WB <= 1'b0;
++            csr_wmask <= 32'b0;
++            csr_wdata <= 32'b0;
++            eret_flush_WB <= 1'b0;
++        end
++        else if(data_allowin) begin
++            csr_num <= csr_num_MEM;
++            csr_en <= csr_en_MEM;
++            csr_we_WB <= csr_we_MEM;
++            csr_wmask <= csr_wmask_MEM;
++            csr_wdata <= csr_wdata_MEM;
++            eret_flush_WB <= eret_flush_MEM;
++        end
++    end
++    assign rf_wdata =  csr_en ? csr_rvalue : rf_wdata1;
++    assign csr_we = csr_we_WB & valid;
++    assign eret_flush = eret_flush_WB & valid;
++
++    reg wb_ex_WB;
++    always @(posedge clk) begin
++        if (reset) begin
++            wb_ex_WB <= 1'b0;
++            wb_ecode <= 9'b0;
++            wb_esubcode <= 9'b0;
++            wb_pc <= 32'b0;
++            wb_vaddr <= 32'b0;
++        end
++        else if(data_allowin) begin
++            wb_ex_WB <= wb_ex_MEM;
++            wb_ecode <= wb_ecode_MEM;
++            wb_esubcode <= wb_esubcode_MEM;
++            /*--------------------------------------*/
++            // 这两个异常信号并未实现生成和传�?�，这里时钟将其设置为零，需要进行实现！！！
++            wb_pc <= 32'b0;
++            wb_vaddr <= 32'b0;
++            /*--------------------------------------*/
++        end
++    end
++    assign wb_ex = wb_ex_WB & valid;
++
+ endmodule
+\ No newline at end of file
+diff --git a/pre_IF.v b/pre_IF.v
+index feb1ff9..2902057 100644
+--- a/pre_IF.v
++++ b/pre_IF.v
+@@ -6,6 +6,9 @@ module pre_IF(
+     input  wire [31:0] br_target,           // 跳转地址
+ 
+     input  wire        from_allowin,       // IF周期允许数据进入
++
++    input  wire        ex_en,              // 出现异常处理信号，或者eret指令
++    input  wire [31:0] ex_entry,           // 异常处理入口地址，或者异常返回地�?
+     
+     output wire        to_valid,
+     output wire [31:0] nextpc
+@@ -22,16 +25,16 @@ module pre_IF(
+     end
+     assign to_valid = valid;
+ 
+-    reg  [31:0] PC;              // IF级当前PC�?
+-    wire [31:0] seq_pc;             // 顺序化的PC�?
++    reg  [31:0] PC;              // IF级当前PC�??
++    wire [31:0] seq_pc;             // 顺序化的PC�??
+     assign seq_pc       = PC + 3'h4;
+-    assign nextpc       = br_taken ? br_target : seq_pc;
++    assign nextpc       = (ex_en) ? ex_entry : (br_taken ? br_target : seq_pc);
+ 
+     always @(posedge clk) begin
+         if (reset) begin
+             PC <= 32'h1bfffffc;  //trick: to make nextpc be 0x1c000000 during reset 
+         end
+-        else if(valid && from_allowin) begin // 当数据有效且IF允许数据进入时再修改PC�?
++        else if(valid && from_allowin) begin // 当数据有效且IF允许数据进入时再修改PC�??
+             PC <= nextpc; 
+         end
+     end    
+-- 
+2.37.1 (Apple Git-137.1)
+
