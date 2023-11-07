@@ -7,44 +7,50 @@ module pipe_IF(
 
     input  wire [31:0] from_pc,
 
-    input wire         br_taken,       // 后面有跳转，当前指令和PC被取�?
+    input wire         br_taken,       // 后面有跳转，当前指令和PC被取消
 
-    input  wire        flush_WB,        // eret指令，清空流水线
+    input  wire        ex_WB,           // 异常指令到达WB级，清空流水线
+    input  wire        flush_WB,        // ertn指令到达WB级，清空流水线
     
     output wire        to_valid,       // IF数据可以发出
-    output wire        to_allowin,     // 允许preIF阶段的数据进�??
+    output wire        to_allowin,     // 允许preIF阶段的数据进入
 
-    output reg [31:0] PC
+    output wire        ex_adef,         // 取指地址错例外寄存器
+    output reg [31:0]  PC
 ); 
 
-    wire ready_go;              // 数据处理完成信号
-    reg valid;   
-    assign ready_go = valid;    // 此时由于RAM�??定能够在�??周期内完成数据处�??
-    assign to_allowin = !valid || ready_go && from_allowin; 
-    assign to_valid = valid && ready_go && ~flush_WB;
-   
-    always @(posedge clk) begin
-        if (reset) begin
-            valid <= 1'b0;
-        end
-        else if(to_allowin) begin // 如果当前阶段允许数据进入，则数据是否有效就取决于上一阶段数据是否可以发出
-            valid <= from_valid;
-        end
-        else if(br_taken) begin // 如果�??要跳转，当前阶段数据不能在下�??周期传到下一个流水线，则�??要将当前的数据给无效化，但当前没有什么用，这个判断一定要放在上一个的后面
-            valid <= 1'b0;
-        end
-    end
+wire ready_go;              // 数据处理完成信号
+reg valid;   
+assign ready_go = valid;    // 此时由于指令RAM一定能够在一个周期内完成数据处理
+assign to_allowin = !valid || ready_go && from_allowin || ex_WB || flush_WB; 
+assign to_valid = valid && ready_go && ~flush_WB & ~ex_WB;
 
-    wire data_allowin; // 拉手成功，数据可以进�??
-    assign data_allowin = from_valid && to_allowin;
-
-    always @(posedge clk) begin
-        if (reset) begin
-            PC <= 32'b0;
-        end
-        else if(data_allowin) begin       // 当数据有效时再传�??
-            PC <= from_pc;
-        end
+always @(posedge clk) begin
+    if (reset) begin
+        valid <= 1'b0;
     end
+    else if(to_allowin) begin // 如果当前阶段允许数据进入，则数据是否有效就取决于上一阶段数据是否可以发出
+        valid <= from_valid;
+    end
+    else if(br_taken) begin // 如果�???要跳转，当前阶段数据不能在下�???周期传到下一个流水线，则�???要将当前的数据给无效化，但当前没有什么用，这个判断一定要放在上一个的后面
+        valid <= 1'b0;
+    end
+end
+
+wire data_allowin; // 拉手成功，数据可以进入
+assign data_allowin = from_valid && to_allowin;   
+
+always @(posedge clk) begin
+    if (reset) begin
+        PC <= 32'b0;
+    end
+    else if(data_allowin) begin       // 当数据有效时再传入
+        PC <= from_pc;
+    end
+end
+
+assign ex_adef = (PC[1:0] != 2'b00);
+
+
 
 endmodule
