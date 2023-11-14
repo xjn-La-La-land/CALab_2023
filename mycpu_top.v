@@ -3,16 +3,24 @@ module mycpu_top(
     input  wire        clk,
     input  wire        resetn,
     // inst sram interface
-    output wire [3:0]  inst_sram_we,    // RAM字节写使�???
-    output wire [31:0] inst_sram_addr,
-    output wire [31:0] inst_sram_wdata,
-    output wire        inst_sram_en,    // RAM的片选信号，高电平有�???
-    input  wire [31:0] inst_sram_rdata,
+    output wire        inst_sram_req,    // 指令RAM读写请求信号
+    output wire        inst_sram_wr,     // 为1表示是写请求，为0表示是读请求(指令RAM恒为0)
+    output wire [ 1:0] inst_sram_size,   // 请求传输的字节数，0: 1 byte；1: 2 bytes；2: 4 bytes
+    output wire [ 3:0] inst_sram_wstrb,  // 写请求的字节写使能
+    output wire [31:0] inst_sram_addr,   // 读写请求的地址
+    output wire [31:0] inst_sram_wdata,  // 写请求的写数据(指令RAM恒为0)
+    input  wire        inst_sram_addr_ok,// 该次请求的地址传输OK，读：地址被接收；写：地址和数据被接收
+    input  wire        inst_sram_data_ok,// 该次请求的数据传输OK，读：数据返回；写：数据写入完成
+    input  wire [31:0] inst_sram_rdata,  // 读请求返回的读数据
     // data sram interface
-    output wire [3:0]  data_sram_we,
+    output wire        data_sram_req,
+    output wire        data_sram_wr,
+    output wire [ 1:0] data_sram_size,
+    output wire [ 3:0] data_sram_wstrb,
     output wire [31:0] data_sram_addr,
     output wire [31:0] data_sram_wdata,
-    output wire        data_sram_en,
+    input  wire        data_sram_addr_ok,
+    input  wire        data_sram_data_ok,
     input  wire [31:0] data_sram_rdata,
     // trace debug interface
     output wire [31:0] debug_wb_pc,
@@ -23,25 +31,24 @@ module mycpu_top(
     reg         reset;
     always @(posedge clk) reset <= ~resetn;
     
-    wire [31:0] pc_preIF_to_IF;
     wire [31:0] pc_IF_to_ID;
     wire [31:0] pc_ID_to_EX;
     wire [31:0] pc_EX_to_MEM;
     wire [31:0] pc_MEM_to_WB;
     wire [31:0] pc_WB;
 
-    wire        IF_allowin;
     wire        ID_allowin;
     wire        EX_allowin;
     wire        MEM_allowin;
     wire        WB_allowin;
 
-    wire        preIF_valid;
     wire        IF_valid;
     wire        ID_valid;
     wire        EX_valid;
     wire        MEM_valid;
     wire        WB_valid;
+
+    wire [31:0] mem_wdata;
 
     wire        br_taken;      // 跳转信号
     wire [31:0] br_target;
@@ -73,8 +80,6 @@ module mycpu_top(
 
     wire [ 4:0] load_op_ID;
     wire [ 2:0] store_op;
-    wire [31:0] data_sram_wdata_ID;
-    wire        data_sram_en_ID;
 
     wire [ 4:0] load_op_EX;
     wire [31:0] alu_result;
@@ -143,7 +148,6 @@ module mycpu_top(
 
     wire  [31:0] wb_vaddr_MEM;
 
-    wire  [31:0] wb_pc_WB;
     wire  [31:0] wb_vaddr_WB;
 
     // 异常处理地址
@@ -156,46 +160,57 @@ module mycpu_top(
     wire         has_int;
 
 
-    pre_IF u_pre_IF(
-        .clk          (clk),
-        .reset        (reset),
+    // pre_IF u_pre_IF(
+    //     .clk          (clk),
+    //     .reset        (reset),
 
-        .br_taken     (br_taken),
-        .br_target    (br_target),
+    //     .br_taken     (br_taken),
+    //     .br_target    (br_target),
 
-        .from_allowin (IF_allowin),
+    //     .from_allowin (IF_allowin),
 
-        .ex_en        (ertn_flush_WB | ex_WB),   // 出现异常处理信号，或者ertn指令
-        .ex_entry     (ex_entry),
+    //     .ex_en        (ertn_flush_WB | ex_WB),   // 出现异常处理信号，或者ertn指令
+    //     .ex_entry     (ex_entry),
 
-        .to_valid     (preIF_valid),
-        .nextpc       (pc_preIF_to_IF)
-    );
+    //     .to_valid     (preIF_valid),
+    //     .nextpc       (pc_preIF_to_IF),
 
-    assign inst_sram_en    = IF_allowin; 
-    assign inst_sram_we    = 4'b0;
-    assign inst_sram_addr  = pc_preIF_to_IF;
-    assign inst_sram_wdata = 32'b0; 
+    //     .inst_sram_req(inst_sram_req),
+    //     .inst_sram_wr (inst_sram_wr),
+    //     .inst_sram_size(inst_sram_size),
+    //     .inst_sram_wstrb(inst_sram_wstrb),
+    //     .inst_sram_addr(inst_sram_addr),
+    //     .inst_sram_wdata(inst_sram_wdata),
+    //     .inst_sram_addr_ok(inst_sram_addr_ok)
+    // );
 
     pipe_IF u_pipe_IF(
         .clk          (clk),
         .reset        (reset),
 
         .from_allowin (ID_allowin),
-        .from_valid   (preIF_valid),
-
-        .from_pc      (pc_preIF_to_IF),
 
         .br_taken     (br_taken),
+        .br_target    (br_target),
 
         .ex_WB        (ex_WB),
         .flush_WB     (ertn_flush_WB),
 
         .to_valid     (IF_valid),
-        .to_allowin   (IF_allowin),
 
         .ex_adef      (ex_adef_IF),
-        .PC           (pc_IF_to_ID)
+        .PC           (pc_IF_to_ID),
+
+        .ex_entry     (ex_entry),
+
+        .inst_sram_req(inst_sram_req),
+        .inst_sram_wr (inst_sram_wr),
+        .inst_sram_size(inst_sram_size),
+        .inst_sram_wstrb(inst_sram_wstrb),
+        .inst_sram_addr(inst_sram_addr),
+        .inst_sram_wdata(inst_sram_wdata),
+        .inst_sram_addr_ok(inst_sram_addr_ok),
+        .inst_sram_data_ok(inst_sram_data_ok)      
     );
 
     pipe_ID u_pipe_ID(
@@ -206,6 +221,7 @@ module mycpu_top(
         .from_valid(IF_valid),
 
         .from_pc(pc_IF_to_ID),
+
         .inst_sram_rdata(inst_sram_rdata),
 
         .rf_rdata1(rf_rdata1),         
@@ -218,6 +234,7 @@ module mycpu_top(
 
         .rf_we_MEM(rf_we_MEM),
         .rf_waddr_MEM(rf_waddr_MEM),
+        .mem_waiting(mem_waiting),
         .rf_wdata_MEM(rf_wdata),    // 用于数据前递
         
         .rf_we_WB(rf_we_WB),
@@ -256,10 +273,9 @@ module mycpu_top(
         .alu_src1(alu_src1),       // ALU的输入          
         .alu_src2(alu_src2),
         
-        .data_sram_en(data_sram_en_ID),
         .load_op(load_op_ID),
         .store_op(store_op),
-        .data_sram_wdata(data_sram_wdata_ID),
+        .mem_wdata(mem_wdata),
 
         .csr_num(csr_num_ID),
         .csr_en(csr_en_ID),
@@ -295,8 +311,7 @@ module mycpu_top(
 
         .load_op_ID(load_op_ID),
         .store_op_ID(store_op),
-        .data_sram_en_ID(data_sram_en_ID),
-        .data_sram_wdata_ID(data_sram_wdata_ID),
+        .mem_wdata_ID(mem_wdata),
 
         .csr_num_ID(csr_num_ID),
         .csr_en_ID(csr_en_ID),
@@ -326,10 +341,14 @@ module mycpu_top(
         .res_from_mem(res_from_mem_EX),
 
         .load_op(load_op_EX),
-        .data_sram_en(data_sram_en),
-        .data_sram_we_out(data_sram_we),
+
+        .data_sram_req(data_sram_req),
+        .data_sram_wr(data_sram_wr),
+        .data_sram_size(data_sram_size),
+        .data_sram_wstrb(data_sram_wstrb),
         .data_sram_addr(data_sram_addr),
         .data_sram_wdata(data_sram_wdata),
+        .data_sram_addr_ok(data_sram_addr_ok),
 
         .csr_num(csr_num_EX),
         .csr_en_out(csr_en_EX),
@@ -363,9 +382,11 @@ module mycpu_top(
 
         .rf_we_EX(rf_we_EX),
         .rf_waddr_EX(rf_waddr_EX),
-        .res_from_mem_EX(res_from_mem_EX),   // �????后要写进寄存器的结果是否来自内存
+        .res_from_mem_EX(res_from_mem_EX),
 
-        .data_sram_rdata(data_sram_rdata),   // 读数�????
+        .data_sram_req(data_sram_req),
+        .data_sram_rdata(data_sram_rdata),
+        .data_sram_data_ok(data_sram_data_ok),
 
         .csr_num_EX(csr_num_EX),
         .csr_en_EX(csr_en_EX),
@@ -386,7 +407,9 @@ module mycpu_top(
         .wb_vaddr_EX(wb_vaddr_EX),  // 无效地址
 
         .to_valid(MEM_valid),       // IF数据可以发出
-        .to_allowin(MEM_allowin),     // 允许preIF阶段的数据进�???? 
+        .to_allowin(MEM_allowin),     // 允许preIF阶段的数据进入
+
+        .mem_waiting(mem_waiting),
 
         .rf_we(rf_we_MEM),          // 用于读写对比
         .rf_waddr(rf_waddr_MEM),

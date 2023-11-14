@@ -15,10 +15,9 @@ module pipe_EX(
     input  wire [ 4:0] rf_waddr_ID,
     input  wire        res_from_mem_ID,   // 之后要写进寄存器的结果是否来自内存
 
-    input  wire [ 4:0] load_op_ID,
-    input  wire [ 2:0] store_op_ID,
-    input  wire        data_sram_en_ID,
-    input  wire [31:0] data_sram_wdata_ID,
+    input  wire [ 4:0] load_op_ID,   // {inst_ld_b, inst_ld_bu, inst_ld_h, inst_ld_hu, inst_ld_w}
+    input  wire [ 2:0] store_op_ID,  // {inst_st_b, inst_st_h, inst_st_w}
+    input  wire [31:0] mem_wdata_ID,
 
     input  wire [13:0] csr_num_ID,
     input  wire        csr_en_ID,
@@ -47,10 +46,14 @@ module pipe_EX(
     output reg         res_from_mem,   // 之后要写进寄存器的结果是否来自内存
 
     output reg  [ 4:0] load_op,
-    output reg         data_sram_en,
-    output wire [ 3:0] data_sram_we_out,
+
+    output wire        data_sram_req,
+    output wire        data_sram_wr,
+    output wire [ 1:0] data_sram_size,
+    output wire [ 3:0] data_sram_wstrb,
     output wire [31:0] data_sram_addr,
-    output reg  [31:0] data_sram_wdata,
+    output wire [31:0] data_sram_wdata,
+    input  wire        data_sram_addr_ok,
 
     output reg [13:0]  csr_num,
     output wire        csr_en_out,
@@ -72,8 +75,11 @@ module pipe_EX(
 );
 
 
-wire ready_go;              // 数据处理完成信号
-reg valid;
+wire       ready_go;              // 数据处理完成信号
+reg        valid;
+reg [31:0] mem_wdata;
+wire       data_sram_req_valid;   // 访存请求有效信号
+// reg        data_sram_addr_ok_hold;
 
 // 33-bit multiplier
 wire op_mul_w;      //32-bit signed multiplication
@@ -106,7 +112,8 @@ reg         clear_valid;
 wire [63:0] div_result_signed;
 wire [63:0] div_result_unsigned;
 
-assign ready_go = valid & ~wait_div & ~(mul_en & ~mul_ready);    // 当前数据是valid并且读后写冲突完�??
+
+assign ready_go = valid & ~wait_div & ~(mul_en & ~mul_ready) & (~data_sram_req || data_sram_addr_ok);
 assign to_allowin = !valid || ready_go && from_allowin || ex_WB || flush_WB; 
 assign to_valid = valid & ready_go & ~flush_WB & ~ex_WB;
     
@@ -121,6 +128,18 @@ end
 
 wire data_allowin; // 拉手成功，数据可以进入
 assign data_allowin = from_valid && to_allowin;
+
+// always @(posedge clk) begin
+//     if(reset) begin
+//         data_sram_addr_ok_hold <= 1'b0;
+//     end
+//     else if(data_sram_addr_ok) begin
+//         data_sram_addr_ok_hold <= 1'b1;
+//     end
+//     else if(from_valid) begin
+//         data_sram_addr_ok_hold <= 1'b0;
+//     end
+// end
 
 always @(posedge clk) begin
     if (reset) begin
@@ -168,24 +187,26 @@ wire [3:0] st_b_strb;    // 内存写数据字节掩码
 wire [3:0] st_h_strb;
 wire [3:0] st_w_strb;
 
-wire [3:0]  data_sram_we;
-
 always @(posedge clk) begin
     if (reset) begin
         load_op         <= 5'b0;
         store_op        <= 3'b0;
-        data_sram_en    <= 1'b0;
-        data_sram_wdata <= 32'b0;
+        mem_wdata       <= 32'b0;
     end
     else if(data_allowin) begin
         load_op         <= load_op_ID;
         store_op        <= store_op_ID;
-        data_sram_en    <= data_sram_en_ID;
-        data_sram_wdata <= data_sram_wdata_ID;
+        mem_wdata       <= mem_wdata_ID;
     end
 end
 
-// data_sram_we的赋值
+assign data_sram_req = ((load_op != 5'b0) || (store_op != 3'b0)) && from_allowin && data_sram_req_valid;
+assign data_sram_wr  = (store_op != 3'b0);
+assign data_sram_size = {2{load_op[4] | load_op[3] | store_op[2]}} & 2'b00 |
+                        {2{load_op[2] | load_op[1] | store_op[1]}} & 2'b01 |
+                        {2{load_op[0] | store_op[0]}} & 2'b10;
+
+
 assign st_b_strb = {4{alu_result1[1:0]==2'b00}} & {4'b0001} |
                     {4{alu_result1[1:0]==2'b01}} & {4'b0010} |
                     {4{alu_result1[1:0]==2'b10}} & {4'b0100} |
@@ -193,11 +214,13 @@ assign st_b_strb = {4{alu_result1[1:0]==2'b00}} & {4'b0001} |
 assign st_h_strb = {4{alu_result1[1:0]==2'b00}} & {4'b0011} |
                     {4{alu_result1[1:0]==2'b10}} & {4'b1100};
 assign st_w_strb = 4'b1111;
-assign data_sram_we = {4{store_op[2]}} & st_b_strb |
-                      {4{store_op[1]}} & st_h_strb |
-                      {4{store_op[0]}} & st_w_strb;
+assign data_sram_wstrb = {4{store_op[2]}} & st_b_strb |
+                         {4{store_op[1]}} & st_h_strb |
+                         {4{store_op[0]}} & st_w_strb;
 
-assign data_sram_addr  = {alu_result[31:2], 2'b00};
+assign data_sram_addr  = alu_result;  // !!!类sram总线的addr不需要4byte对齐！！！
+
+assign data_sram_wdata = mem_wdata;
 
 alu u_alu(
     .alu_op     (alu_op[11:0]),
@@ -355,11 +378,9 @@ end
 assign exception_source = {exception_source_old[5:3], ex_ale, exception_source_old[1:0]};
 
 // store指令若要发出访存请求，需要检查EX、MEM、WB级是否有异常或ertn
-wire data_sram_we_valid = data_sram_en && valid &&
-                          (exception_source == 6'b0) &&
-                          (~ex_MEM && ~flush_MEM) &&
-                          (~ex_WB && ~flush_WB);
-
-assign data_sram_we_out = {4{data_sram_we_valid}} & data_sram_we;
+assign data_sram_req_valid = valid &&
+                             (exception_source == 6'b0) &&
+                             (~ex_MEM && ~flush_MEM) &&
+                             (~ex_WB && ~flush_WB);
 
 endmodule

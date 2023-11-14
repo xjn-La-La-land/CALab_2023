@@ -6,6 +6,7 @@ module pipe_ID(
     input  wire        from_valid,     // preIF数据可以发出
 
     input  wire [31:0] from_pc,
+
     input  wire [31:0] inst_sram_rdata,
 
     input  wire [31:0] rf_rdata1,         // 读数据
@@ -18,6 +19,7 @@ module pipe_ID(
 
     input  wire        rf_we_MEM,
     input  wire [ 4:0] rf_waddr_MEM,
+    input  wire        mem_waiting,  // load阻塞
     input  wire [31:0] rf_wdata_MEM, // MEM阶段用于数据前递
     
     input  wire        rf_we_WB,
@@ -43,7 +45,7 @@ module pipe_ID(
     output wire        to_allowin,     // 允许preIF阶段的数据进入
 
     output wire        br_taken,       // 跳转信号
-    output wire [31:0] br_target,      
+    output wire [31:0] br_target,      // 跳转目标地址
 
     output wire [ 4:0] rf_raddr1,      // 读寄存器编号
     output wire [ 4:0] rf_raddr2,
@@ -56,10 +58,9 @@ module pipe_ID(
     output wire [31:0] alu_src1,       // ALU的操作数          
     output wire [31:0] alu_src2,
 
-    output wire        data_sram_en,
     output wire [ 4:0] load_op,         // load操作码
     output wire [ 2:0] store_op,        // store操作码
-    output wire [31:0] data_sram_wdata,
+    output wire [31:0] mem_wdata,       // store写数据
 
     // 控制寄存器
     output  [13:0]     csr_num,
@@ -99,7 +100,7 @@ always @(posedge clk) begin
     if (reset) begin
         valid <= 1'b0;
     end
-    else if(ready_go && br_taken) begin // 如果需要跳转并且跳转了，则从下一个阶段开始valid就需要重置为零了
+    else if(ready_go && (br_taken || ex_WB || flush_WB)) begin // 如果需要跳转并且跳转了，则从下一个阶段开始valid就需要重置为零了
         valid <= 1'b0;
     end
     else if(to_allowin) begin // 如果当前阶段允许数据进入，则数据是否有效就取决于上一阶段数据是否可以发出
@@ -425,8 +426,12 @@ assign rf_raddr1 = {5{raddr1_valid}} & rj;
 assign rf_raddr2 = {5{raddr2_valid}} & (src_reg_is_rd ? rd :rk);
 
 // 写后读冲突相关的处理
-assign load_rw_conflict = (rf_raddr1 != 5'b0) && rf_we_EX && res_from_mem_EX && (rf_raddr1 == rf_waddr_EX) ||
-                          (rf_raddr2 != 5'b0) && rf_we_EX && res_from_mem_EX && (rf_raddr2 == rf_waddr_EX);
+assign load_rw_conflict = (rf_raddr1 != 5'b0) && 
+                            (rf_we_EX && res_from_mem_EX && (rf_raddr1 == rf_waddr_EX) || 
+                             rf_we_MEM && mem_waiting && (rf_raddr1 == rf_waddr_MEM))  ||
+                          (rf_raddr2 != 5'b0) && 
+                            (rf_we_EX && res_from_mem_EX && (rf_raddr2 == rf_waddr_EX) ||
+                             rf_we_MEM && mem_waiting && (rf_raddr2 == rf_waddr_MEM));
 
 assign csrr_rw_conflict = ((rf_raddr1 != 5'b0) || (rf_raddr2 != 5'b0)) && 
                           (((csr_en_EX || rd_cnt_EX) && (rf_raddr1 == rf_waddr_EX || rf_raddr2 == rf_waddr_EX)) ||
@@ -479,10 +484,9 @@ assign store_op     = {inst_st_b, inst_st_h, inst_st_w};
 assign alu_src1 = src1_is_pc ? PC[31:0] : rj_value;
 assign alu_src2 = src2_is_imm ? imm : rkd_value;
 
-assign data_sram_en = valid; // 片选信号在读或者写的时候都要拉高！！！
-assign data_sram_wdata = inst_st_b? {4{rkd_value[ 7:0]}} :    // 写数据的有效字节/半字在低位
-                         inst_st_h? {2{rkd_value[15:0]}} :
-                                     rkd_value;
+assign mem_wdata = inst_st_b ? {4{rkd_value[ 7:0]}} :
+                   inst_st_h ? {2{rkd_value[15:0]}} :
+                                  rkd_value[31:0];
 
 // 控制寄存器逻辑
 assign csr_num = inst_rdcntid ? 14'h40 : inst[23:10];

@@ -95,7 +95,7 @@ always @(posedge clk) begin
     end
 end
 
-assign rf_we = gr_we && valid && ~wb_ex;  // !!异常指令不写回
+assign rf_we = gr_we && to_valid && ~wb_ex;  // !!异常指令不写回
 
 
 /* ------------------------------------------------例外处理-------------------------------------------------------*/

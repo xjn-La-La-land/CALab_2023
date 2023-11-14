@@ -13,6 +13,8 @@ module pipe_MEM(
     input  wire [ 4:0] rf_waddr_EX,
     input  wire        res_from_mem_EX,   // 之后要写进寄存器的结果是否来自内存
 
+    input  wire        data_sram_req,
+    input  wire        data_sram_data_ok,
     input  wire [31:0] data_sram_rdata,   // 内存读数据
 
     input  wire [13:0] csr_num_EX,
@@ -34,6 +36,8 @@ module pipe_MEM(
 
     output wire        to_valid,         // IF数据可以发出
     output wire        to_allowin,       // 允许preIF阶段的数据进入
+
+    output wire        mem_waiting,      // 前递到IF级，表示load数据还未返回，需要继续阻塞
 
     output wire        rf_we,
     output reg  [ 4:0] rf_waddr,
@@ -60,8 +64,12 @@ module pipe_MEM(
 );
 
 wire ready_go;              // 数据处理完成信号
-reg valid;
-assign ready_go = valid;
+reg  valid;
+reg  data_sram_req_reg;
+//reg  data_sram_data_ok_hold;
+reg  mem_waiting_reg;
+
+assign ready_go = valid && (~data_sram_req_reg || data_sram_data_ok);
 assign to_allowin = !valid || ready_go && from_allowin || ex_WB || flush_WB; 
 assign to_valid = valid & ready_go & ~flush_WB & ~ex_WB;
     
@@ -74,7 +82,7 @@ always @(posedge clk) begin
     end
 end
 
-wire data_allowin; // 拉手成功，数据可以进�???
+wire data_allowin; // 拉手成功，数据可以进入
 assign data_allowin = from_valid && to_allowin;
 always @(posedge clk) begin
     if (reset) begin
@@ -84,6 +92,41 @@ always @(posedge clk) begin
         PC <= from_pc;
     end
 end
+
+
+// always @(posedge clk) begin
+//     if(reset) begin
+//         data_sram_data_ok_hold <= 1'b0;
+//     end
+//     else if(data_sram_data_ok) begin
+//         data_sram_data_ok_hold <= 1'b1;
+//     end
+//     else if(from_valid) begin
+//         data_sram_data_ok_hold <= 1'b0;
+//     end
+// end
+
+always @(posedge clk) begin
+    if(reset) begin
+        data_sram_req_reg <= 1'b0;
+    end
+    else if(data_allowin) begin
+        data_sram_req_reg <= data_sram_req;
+    end
+end
+
+always @(posedge clk) begin
+    if(reset) begin
+        mem_waiting_reg <= 1'b0;
+    end
+    else if(data_allowin && load_op_EX != 5'b0) begin
+        mem_waiting_reg <= 1'b1;
+    end
+    else if(data_sram_data_ok) begin
+        mem_waiting_reg <= 1'b0;
+    end
+end
+assign mem_waiting = mem_waiting_reg;
 
 wire [ 7:0] mem_byte;
 wire [15:0] mem_halfword;
