@@ -1,3 +1,5 @@
+`include "define.v"
+
 module pipe_ID(
     input  wire        clk,
     input  wire        reset, 
@@ -36,10 +38,13 @@ module pipe_ID(
     
     input  wire        ex_WB,       // 异常指令到达WB级，清空流水线
     input  wire        flush_WB,    // ertn指令到达WB级，清空流水线
+    input  wire        tlb_flush_WB,// tlb冲突指令到达WB级，清空流水线
 
     input  wire        has_int,        // 中断信号
 
-    input  wire        ex_adef_IF,     // adef异常信号
+    input  wire [13:0] exception_source_in, // IF级传入的exception_source
+
+
 
     output wire        to_valid,       // IF数据可以发出
     output wire        to_allowin,     // 允许preIF阶段的数据进入
@@ -75,8 +80,15 @@ module pipe_ID(
     // 读计时器信号
     output wire [2:0]  rd_cnt_op,      // {inst_rdcntvh_w, inst_rdcntvl_w, inst_rdcntid}
 
+    // tlb信号
+    output wire [4:0]  tlb_command,    // 由于tlb指令在后面的流水级有特殊操作，因此将指令信号传递到EX阶段
+    output wire [4:0]  invtlb_op,
+
+    // tlb 修改引发的访存冲突
+    output reg         tlb_flush,      // tlb指令修改引发的访存冲突
+
     // 异常信号
-    output wire [5:0]  exception_source, // {INE, BRK, SYS, ALE, ADEF, INT}
+    output wire [13:0] exception_source, // {TLBR(IF), TLBR(EX), INE, BRK, SYS, ALE, ADEF, PPI(IF), PPI(EX), PME, PIF, PIS, PIL, INT}
 
     output reg  [31:0] PC
 );
@@ -91,16 +103,15 @@ wire gr_rw_conflict;        // 通用寄存器数据相关
 
 wire csr_rw_conflict;       // csr寄存器数据相关
 
-
 assign ready_go = valid && (~gr_rw_conflict) && (~csr_rw_conflict);
-assign to_allowin = !valid || ready_go && from_allowin || ex_WB || flush_WB;
-assign to_valid = valid & ready_go & ~flush_WB & ~ex_WB;
+assign to_allowin = !valid || ready_go && from_allowin || ex_WB || flush_WB || tlb_flush_WB;
+assign to_valid = valid & ready_go & ~flush_WB & ~ex_WB & ~tlb_flush_WB;
     
 always @(posedge clk) begin
     if (reset) begin
         valid <= 1'b0;
     end
-    else if(ready_go && (br_taken || ex_WB || flush_WB)) begin // 如果需要跳转并且跳转了，则从下一个阶段开始valid就需要重置为零了
+    else if(ready_go && (br_taken || ex_WB || flush_WB || tlb_flush_WB)) begin // 如果需要跳转并且跳转了，则从下一个阶段开始valid就需要重置为零了
         valid <= 1'b0;
     end
     else if(to_allowin) begin // 如果当前阶段允许数据进入，则数据是否有效就取决于上一阶段数据是否可以发出
@@ -244,10 +255,17 @@ wire        inst_rdcntvl_w; /*         rdcntvl.w rd                   rdtimel.w 
 wire        inst_rdcntvh_w; /*         rdcntvh.w rd                   rdtimeh.w rd, zero                        */
 wire        inst_rdcntid;   /*         rdcntid rj                     rdtimel.w zero, rj                        */
 /*-------------------------------------------------------------------------------------------------------------*/
+// TLB相关指令
+wire        inst_tlbsrch;  /*           tlbsrch                                                                 */
+wire        inst_tlbwr;    /*           tlbwr                                                                   */
+wire        inst_tlbrd;    /*           tlbrd                                                                   */
+wire        inst_tlbfill;  /*           tlbfill                                                                 */
+wire        inst_invtlb;   /*           invtlb op, rj, rk                                                       */
+/*-------------------------------------------------------------------------------------------------------------*/
+
 // 异常信号定义
+reg  [13:0] exception_source_IF;/*     exception source from IF                                              */
 wire        ex_int;       /*           interrupt signal                                                      */
-reg         ex_adef;      /*           exception adef signal  (从IF级传进来的)                                */
-wire        ex_ale;       /*           exception ale signal                                                  */
 wire        ex_sys;       /*           exception syscall signal                                              */
 wire        ex_brk;       /*           exception break signal                                                */
 wire        ex_ine;       /*           exception ine signal                                                  */
@@ -330,7 +348,7 @@ assign inst_div_w       = op_31_26_d[6'h00] & op_25_22_d[4'h0] & op_21_20_d[2'h2
 assign inst_mod_w       = op_31_26_d[6'h00] & op_25_22_d[4'h0] & op_21_20_d[2'h2] & op_19_15_d[5'h01];
 assign inst_div_wu      = op_31_26_d[6'h00] & op_25_22_d[4'h0] & op_21_20_d[2'h2] & op_19_15_d[5'h02];
 assign inst_mod_wu      = op_31_26_d[ 6'h00] & op_25_22_d[4'h0] & op_21_20_d[2'h2] & op_19_15_d[5'h03];
-assign inst_csr         = op_31_26_d[6'h01] & ~inst_ertn;
+assign inst_csr         = op_31_26_d[6'h01] & ~inst[25];
 assign inst_csrrd       = inst_csr & (rj == 5'b0);
 assign inst_csrwr       = inst_csr & (rj == 5'b1);
 assign inst_csrxchg     = inst_csr & ~(inst_csrrd | inst_csrwr);
@@ -344,6 +362,14 @@ assign inst_rdtimeh_w   = op_31_26_d[6'h00] & op_25_22_d[4'h0] & op_21_20_d[2'h0
 assign inst_rdcntvl_w   = inst_rdtimel_w & (rj == 5'h0);
 assign inst_rdcntvh_w   = inst_rdtimeh_w & (rj == 5'h0);
 assign inst_rdcntid     = inst_rdtimel_w & (rd == 5'h0);
+
+assign inst_tlbsrch     = op_31_26_d[6'h01] & op_25_22_d[4'h9] & op_21_20_d[2'h0] & op_19_15_d[5'h10] & (rk == 5'h0a);
+assign inst_tlbrd       = op_31_26_d[6'h01] & op_25_22_d[4'h9] & op_21_20_d[2'h0] & op_19_15_d[5'h10] & (rk == 5'h0b);
+assign inst_tlbwr       = op_31_26_d[6'h01] & op_25_22_d[4'h9] & op_21_20_d[2'h0] & op_19_15_d[5'h10] & (rk == 5'h0c);
+assign inst_tlbfill     = op_31_26_d[6'h01] & op_25_22_d[4'h9] & op_21_20_d[2'h0] & op_19_15_d[5'h10] & (rk == 5'h0d);
+assign inst_invtlb      = op_31_26_d[6'h01] & op_25_22_d[4'h9] & op_21_20_d[2'h0] & op_19_15_d[5'h13];
+
+
 
 
 assign alu_op[ 0] = inst_add_w | inst_addi_w | inst_pcaddu12i | 
@@ -407,10 +433,12 @@ assign src2_is_imm   = inst_slli_w | inst_srli_w | inst_srai_w |
 assign dst_is_r1     = inst_bl;                     // link操作会将返回地址写入1号寄存器，且这个是隐含的，并不在指令中体现，因此�???要特殊处�???
 assign gr_we         = ~(inst_st_w | inst_st_b | inst_st_h |
                             inst_beq | inst_bne | inst_blt | inst_bge | inst_bltu | inst_bgeu | 
-                            inst_b | inst_ertn | inst_syscall | inst_break); // 判断是否�???要写回寄存器
+                            inst_b | inst_ertn | inst_syscall | inst_break |
+                            inst_tlbfill | inst_invtlb | inst_tlbwr | inst_tlbrd | inst_tlbsrch
+                        ); // 判断是否�???要写回寄存器
 assign dest          = dst_is_r1 ? 5'd1 : (inst_rdcntid ? rj : rd);
 
-assign raddr1_valid = ~(inst_b | inst_bl | inst_lu12i_w | inst_pcaddu12i);
+assign raddr1_valid = ~(inst_b | inst_bl | inst_lu12i_w | inst_pcaddu12i | inst_tlbrd | inst_tlbfill | inst_tlbsrch | inst_tlbwr);
 assign raddr2_valid = ~(inst_slli_w | inst_srli_w | inst_srai_w
                         | inst_addi_w
                         | inst_slti | inst_sltui 
@@ -420,6 +448,7 @@ assign raddr2_valid = ~(inst_slli_w | inst_srli_w | inst_srai_w
                         | inst_pcaddu12i
                         | inst_jirl
                         | inst_b | inst_bl
+                        | inst_tlbrd | inst_tlbfill | inst_tlbsrch | inst_tlbwr
                     );
 
 assign rf_raddr1 = {5{raddr1_valid}} & rj;
@@ -436,6 +465,7 @@ assign load_rw_conflict = (rf_raddr1 != 5'b0) &&
 assign csrr_rw_conflict = ((rf_raddr1 != 5'b0) || (rf_raddr2 != 5'b0)) && 
                           (((csr_en_EX || rd_cnt_EX) && (rf_raddr1 == rf_waddr_EX || rf_raddr2 == rf_waddr_EX)) ||
                            ((csr_en_MEM || rd_cnt_MEM) && (rf_raddr1 == rf_waddr_MEM || rf_raddr2 == rf_waddr_MEM))); // csrrd, csrxchg指令在EX/MEM级不前递，到WB级前递
+
 
 assign gr_rw_conflict = load_rw_conflict || csrr_rw_conflict;
 
@@ -489,10 +519,14 @@ assign mem_wdata = inst_st_b ? {4{rkd_value[ 7:0]}} :
                                   rkd_value[31:0];
 
 // 控制寄存器逻辑
-assign csr_num = inst_rdcntid ? 14'h40 : inst[23:10];
+wire [13:0] csr_num_special;
+assign csr_num_special = {14{inst_rdcntid}} & `CSR_TID
+                       | {14{inst_tlbsrch}} & `CSR_TLBIDX
+                       | {14{inst_tlbrd}} & 14'h3fff; // num全为1表示要写csr寄存器，但是不通过正常的写入口
+assign csr_num = (csr_num_special != 14'b0)? csr_num_special : inst[23:10];
 assign csr_wdata = rkd_value;
-assign csr_en = inst_csr;
-assign csr_we = inst_csrwr | inst_csrxchg; // csr写使能
+assign csr_en = inst_csr | inst_tlbsrch | inst_tlbrd;
+assign csr_we = inst_csrwr | inst_csrxchg | inst_tlbsrch | inst_tlbrd; // csr写使能
 assign csr_wmask = (inst_csrxchg)? rj_value : 32'hffffffff;
 
 assign rd_cnt_op = {inst_rdcntvh_w, inst_rdcntvl_w, inst_rdcntid};
@@ -500,25 +534,40 @@ assign rd_cnt_op = {inst_rdcntvh_w, inst_rdcntvl_w, inst_rdcntid};
 // 当后三个流水级上有csr写入指令，ID级标记中断就要阻塞
 assign csr_rw_conflict = (csr_we_EX | csr_we_MEM | csr_we_WB);
 
-                    
-// ertn指令逻辑
-assign ertn_flush = inst_ertn;
 
-// 异常信号逻辑
+// tlb 相关指令逻辑
+assign tlb_command = {inst_invtlb, inst_tlbrd, inst_tlbfill, inst_tlbwr, inst_tlbsrch};
+assign invtlb_op = rd;
+
+wire ex_invtlb; // invtlb op 值不为0-6时，触发指令不存在异常
+assign ex_invtlb =  inst_invtlb & (invtlb_op[2:0] == 3'h7 | invtlb_op[4:3] != 2'h0);
+
+wire tlb_conflict; // tlb修改和访存冲突，通过标记后面所有的流水级进行消除
+assign tlb_conflict = (inst_tlbwr | inst_tlbfill | inst_tlbrd | inst_invtlb |
+                        (csr_we & (csr_num == `CSR_CRMD 
+                        | csr_num == `CSR_DWM0 
+                        | csr_num == `CSR_DWM1
+                        | csr_num == `CSR_ASID
+                        ))) & valid;
 always @(posedge clk) begin
     if (reset) begin
-        ex_adef <= 1'b0;
+        tlb_flush <= 1'b0;
     end
-    else if(data_allowin) begin
-        ex_adef <= ex_adef_IF;
+    else if (tlb_conflict) begin
+        tlb_flush <= 1'b1;
+    end
+    else if (tlb_flush_WB) begin
+        tlb_flush <= 1'b0;
     end
 end
+                    
+
+assign ertn_flush = inst_ertn;
 
 assign ex_int = has_int;
-assign ex_ale = 1'b0;  // ALE异常在EX阶段才会生成，所以在ID阶段置为0！
 assign ex_sys = inst_syscall;
 assign ex_brk = inst_break;
-assign ex_ine = ~inst_add_w & ~inst_sub_w & ~inst_slt & ~inst_sltu & ~inst_nor &
+assign ex_ine = (~inst_add_w & ~inst_sub_w & ~inst_slt & ~inst_sltu & ~inst_nor &
                 ~inst_and & ~inst_or & ~inst_xor & ~inst_mul_w & ~inst_mulh_w & ~inst_mulh_wu &
                 ~inst_div_w & ~inst_mod_w & ~inst_div_wu & ~inst_mod_wu & ~inst_sll_w &
                 ~inst_srl_w & ~inst_sra_w & ~inst_slli_w & ~inst_srli_w & ~inst_srai_w &
@@ -528,8 +577,22 @@ assign ex_ine = ~inst_add_w & ~inst_sub_w & ~inst_slt & ~inst_sltu & ~inst_nor &
                 ~inst_break & ~inst_csrrd & ~inst_csrwr & ~inst_csrxchg & ~inst_ertn &
                 ~inst_rdcntid & ~inst_rdcntvl_w & ~inst_rdcntvh_w & ~inst_jirl & ~inst_b &
                 ~inst_bl & ~inst_beq & ~inst_bne & ~inst_blt & ~inst_bge &
-                ~inst_bltu & ~inst_bgeu & ~inst_lu12i_w & ~inst_pcaddu12i & ~ex_adef;
+                ~inst_bltu & ~inst_bgeu & ~inst_lu12i_w & ~inst_pcaddu12i & 
+                ~inst_tlbsrch & ~inst_tlbwr & ~inst_tlbrd & ~inst_invtlb & ~inst_tlbfill 
+                | ex_invtlb) 
+                && (exception_source_IF == 14'b0); // IF级无异常
 
-assign exception_source = {ex_ine, ex_brk, ex_sys, ex_ale, ex_adef, ex_int};  // {INE, BRK, SYS, ALE, ADEF, INT}
+
+
+always @(posedge clk) begin
+    if (reset) begin
+        exception_source_IF <= 14'b0;
+    end
+    else if(data_allowin) begin
+        exception_source_IF <= exception_source_in;
+    end
+end
+// {TLBR(IF), TLBR(EX), INE, BRK, SYS, ALE, ADEF, PPI(IF), PPI(EX), PME, PIF, PIS, PIL, INT}
+assign exception_source = exception_source_IF | {2'b0, ex_ine, ex_brk, ex_sys, 8'b0, ex_int};
 
 endmodule

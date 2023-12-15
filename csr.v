@@ -16,8 +16,10 @@ module csr(
     input         wb_ex,        // 异常信号
     input  [5:0]  wb_ecode,     // 异常类型一级代码
     input  [8:0]  wb_esubcode,  // 异常类型二级代码
-    input  [31:0] wb_pc,        // 异常指令地址
-    input  [31:0] wb_vaddr,     // 无效地址
+    input  [31:0] wb_pc,        // 异常指令pc
+    input  [31:0] wb_vaddr,     // 无效虚地址
+
+    input  [13:0] exception_source, // wb级的exception source
 
     input         ertn_flush,   // 异常返回信号
 
@@ -25,7 +27,26 @@ module csr(
 
     output [31:0] csr_rvalue,   // 读数据
     output [31:0] ex_entry,     // 异常入口地址，送往pre_IF阶段
-    output        has_int       // 中断发生信号，送往ID阶段
+    output        has_int,      // 中断发生信号，送往ID阶段
+
+    // 额外端口，供tlb指令使用
+    input  wire        tlbrd,
+    input  wire [18:0] csr_tlbehi_vppn_in,
+    input  wire [31:0] csr_tlbelo0_in,
+    input  wire [31:0] csr_tlbelo1_in,
+    input  wire [31:0] csr_tlbidx_in, 
+    input  wire [ 9:0] csr_asid_asid_in,
+
+    output reg  [ 9:0] csr_asid_asid,  
+    output reg  [18:0] csr_tlbehi_vppn,  
+    output wire [31:0] csr_tlbidx,
+    output wire [31:0] csr_tlbelo0,
+    output wire [31:0] csr_tlbelo1,
+
+    // 额外端口，供取指和load/store使用
+    output wire [31:0] csr_crmd_value,
+    output wire [31:0] csr_dwm0_value,
+    output wire [31:0] csr_dwm1_value
 );
 
 
@@ -37,10 +58,10 @@ module csr(
 // CRMD
 reg  [1:0] csr_crmd_plv;    // 当前特权等级
 reg        csr_crmd_ie;     // 全局中断使能
-wire       csr_crmd_da;     // 直接地址翻译模式的使能
-wire       csr_crmd_pg;     // 映射地址翻译模式的使能
-wire [1:0] csr_crmd_datf;   // 直接地址翻译模式时，取指操作的存储访问类型
-wire [1:0] csr_crmd_datm;   // 直接地址翻译模式时，load和store操作的存储访问类型
+reg        csr_crmd_da;     // 直接地址翻译模式的使能
+reg        csr_crmd_pg;     // 映射地址翻译模式的使能
+reg  [1:0] csr_crmd_datf;   // 直接地址翻译模式时，取指操作的存储访问类型
+reg  [1:0] csr_crmd_datm;   // 直接地址翻译模式时，load和store操作的存储访问类型
 wire [31:0] csr_crmd_rvalue; // 用于读取CRMD
 
 
@@ -69,7 +90,6 @@ wire [31:0] csr_ecfg_rvalue;
 
 // BADV
 reg [31:0] csr_badv_vaddr;      // 无效虚地址
-wire       wb_ex_addr_err;
 wire [31:0] csr_badv_rvalue;
 
 
@@ -108,6 +128,44 @@ reg  [31:0] timer_cnt;        // 定时器计数器
 wire csr_ticlr_clr;
 wire [31:0] csr_ticlr_rvalue;
 
+/*------------------TLB相关寄存器-------------------------*/
+// 访存可能用到这些寄存器，因此需要提供额外的接口
+// Dwm
+reg         csr_dwm_plv0 [1:0];            // 允许plv0访问
+reg         csr_dwm_plv3 [1:0];            // 允许plv3访问
+reg  [1:0]  csr_dwm_mat  [1:0];      // 访存操作的存储访问类型
+reg  [2:0]  csr_dwm_pseg [1:0];      // 直接映射窗口的物理地址的[31:29]位
+reg  [2:0]  csr_dwm_vseg [1:0];      // 直接映射窗口的虚拟地址的[31:29]位
+wire [31:0] csr_dwm_rvalue [1:0];    
+
+// ASID
+// reg [9:0]   csr_asid_asid;           // ASID
+wire [7:0]  csr_asid_asidbits;       // ASID 域的位宽。其直接等于这个域的数值
+wire [31:0] csr_asid_rvalue;
+
+// TLBEHI
+// reg [18:0]  csr_tlbehi_vppn;        
+wire [31:0] csr_tlbehi_rvalue;
+
+// TLBELO
+reg         csr_tlbelo_v [1:0];        
+reg         csr_tlbelo_d [1:0];        
+reg  [1:0]  csr_tlbelo_plv [1:0];      
+reg  [1:0]  csr_tlbelo_mat [1:0];      
+reg         csr_tlbelo_g [1:0];       
+reg  [19:0] csr_tlbelo_ppn [1:0];      
+wire [31:0] csr_tlbelo_rvalue [1:0]; 
+wire [31:0] csr_tlbelo_in [1:0]; // for tlbrd
+
+// TLBIDX
+reg  [3:0] csr_tlbidx_index;    // 如果TLBNUM不是16的话这里要修改
+reg  [5:0] csr_tlbidx_ps;       // 页大小
+reg        csr_tlbidx_ne;       // 有效位
+wire [31:0] csr_tlbidx_rvalue;
+
+// TLBRENTRY
+reg  [25:0] csr_tlbrentry_pa;
+wire [31:0] csr_tlbrentry_rvalue;
 
 /* ------------------------------------------CSR寄存器赋值--------------------------------------------- */
 
@@ -137,13 +195,43 @@ always @(posedge clk) begin // CRMD.IE
                         | ~csr_wmask[`CSR_CRMD_IE] & csr_crmd_ie;
 end
 
-// 未实现的CRMD相关域的功能
-assign csr_crmd_da = 1'b1;
-assign csr_crmd_pg = 1'b0;
-assign csr_crmd_datf = 2'b00;
-assign csr_crmd_datm = 2'b00;
+always @(posedge clk) begin // CRMD.DA, CRMD.PG
+    if (reset) begin
+        csr_crmd_da <= 1'b1;
+        csr_crmd_pg <= 1'b0;
+    end
+    else if(wb_ex && wb_ecode==`ECODE_TLBR) begin // 触发 TLB 重填例外，da赋值为1，pg为0。
+        csr_crmd_da <= 1'b1;
+        csr_crmd_pg <= 1'b0;
+    end
+    else if(ertn_flush && csr_estat_ecode==`ECODE_TLBR) begin // 从TLB例外处理程序返回时，da赋值为0，pg为1
+        csr_crmd_da <= 1'b0;
+        csr_crmd_pg <= 1'b1;
+    end
+    else if (csr_we && csr_num==`CSR_CRMD) begin
+        csr_crmd_da <= csr_wmask[`CSR_CRMD_DA] & csr_wdata[`CSR_CRMD_DA]
+                        | ~csr_wmask[`CSR_CRMD_DA] & csr_crmd_da;
+        csr_crmd_pg <= csr_wmask[`CSR_CRMD_PG] & csr_wdata[`CSR_CRMD_PG]
+                        | ~csr_wmask[`CSR_CRMD_PG] & csr_crmd_pg;
+    end
+end
+
+
+always @(posedge clk) begin // CRMD.DATF, CRMD.DATM
+    if (reset) begin
+        csr_crmd_datf = 2'b0;
+        csr_crmd_datm = 2'b0;
+    end
+    else if(csr_we && csr_num==`CSR_CRMD) begin
+        csr_crmd_datf <= csr_wmask[`CSR_CRMD_DATF] & csr_wdata[`CSR_CRMD_DATF]
+                        | ~csr_wmask[`CSR_CRMD_DATF] & csr_crmd_datf;
+        csr_crmd_datm <= csr_wmask[`CSR_CRMD_DATM] & csr_wdata[`CSR_CRMD_DATM]
+                        | ~csr_wmask[`CSR_CRMD_DATM] & csr_crmd_datm;
+    end
+end
 
 assign csr_crmd_rvalue = {23'b0, csr_crmd_datm, csr_crmd_datf, csr_crmd_pg, csr_crmd_da, csr_crmd_ie, csr_crmd_plv};
+assign csr_crmd_value = csr_crmd_rvalue;
 
 // PRMD寄存器的赋值
 always @(posedge clk) begin // PRMD.PPLV, PRMD.PIE
@@ -214,10 +302,24 @@ assign csr_era_rvalue = csr_era_pc;
 
 
 // BADV寄存器的赋值
-assign wb_ex_addr_err = wb_ecode==`ECODE_ADE || wb_ecode==`ECODE_ALE; // 出现地址错误相关例外
+wire badv_is_pc;     // load、store地址相关例外
+wire badv_is_vaddr;  // 取指地址相关例外
+
+assign badv_is_pc = exception_source[13] || exception_source[7] || exception_source[6] || exception_source[3]; // BADV.Vaddr = wb_pc
+assign badv_is_vaddr = exception_source[12] || exception_source[8] || exception_source[5] || exception_source[4] || exception_source[2] || exception_source[1]; // BADV.Vaddr = wb_vaddr
+
 always @(posedge clk) begin // BADV.VAddr
-    if (wb_ex && wb_ex_addr_err) 
-        csr_badv_vaddr <= (wb_ecode==`ECODE_ADE && wb_esubcode==`ESUBCODE_ADEF) ? wb_pc : wb_vaddr;
+    if (wb_ex) begin
+        if(badv_is_pc) begin
+            csr_badv_vaddr <= wb_pc;
+        end
+        else if(badv_is_vaddr) begin
+            csr_badv_vaddr <= wb_vaddr;
+        end
+    end
+    else if(csr_we && csr_num==`CSR_BADV) begin
+        csr_badv_vaddr <= csr_wmask & csr_wdata | (~csr_wmask) & csr_badv_vaddr;
+    end
 end
 assign csr_badv_rvalue = csr_badv_vaddr;
 
@@ -246,8 +348,6 @@ always @(posedge clk) begin // SAVE.DATA
         csr_save3_data <= csr_wmask[`CSR_SAVE_DATA]&csr_wdata[`CSR_SAVE_DATA]
                         | ~csr_wmask[`CSR_SAVE_DATA]&csr_save3_data;
 end
-
-
 
 // TID寄存器的赋值
 always @(posedge clk) begin // TID.TID
@@ -298,6 +398,191 @@ assign csr_tval_rvalue = csr_tval;
 assign csr_ticlr_clr = 1'b0;
 assign csr_ticlr_rvalue = {31'b0, csr_ticlr_clr};
 
+// Dwm寄存器的赋值
+genvar i;
+generate for (i = 0; i < 2; i = i + 1) begin: gen_dwm_and_tlblo
+    // Dwm
+    always @(posedge clk) begin // Dwm.Plv0, Dwm.Plv3
+        if (reset) begin
+            csr_dwm_plv0[i] <= 1'b0;
+            csr_dwm_plv3[i] <= 1'b0;
+        end
+        else if (csr_we && csr_num==`CSR_DWM0+i) begin
+            csr_dwm_plv0[i] <= csr_wmask[`CSR_DWM_PLV0] & csr_wdata[`CSR_DWM_PLV0]
+                            | ~csr_wmask[`CSR_DWM_PLV0] & csr_dwm_plv0[i];
+            csr_dwm_plv3[i] <= csr_wmask[`CSR_DWM_PLV3] & csr_wdata[`CSR_DWM_PLV3]
+                            | ~csr_wmask[`CSR_DWM_PLV3] & csr_dwm_plv3[i];
+        end
+    end
+
+    always @(posedge clk) begin // Dwm.Pseg Dwm.Vseg
+        if (reset) begin
+            csr_dwm_pseg[i] <= 3'b0;
+            csr_dwm_vseg[i] <= 3'b0;
+        end
+        else if (csr_we && csr_num==`CSR_DWM0+i) begin
+            csr_dwm_pseg[i] <= csr_wmask[`CSR_DWM_PSEG] & csr_wdata[`CSR_DWM_PSEG]
+                            | ~csr_wmask[`CSR_DWM_PSEG] & csr_dwm_pseg[i];
+            csr_dwm_vseg[i] <= csr_wmask[`CSR_DWM_VSEG] & csr_wdata[`CSR_DWM_VSEG]
+                            | ~csr_wmask[`CSR_DWM_VSEG] & csr_dwm_vseg[i];
+        end
+    end
+
+    always @(posedge clk) begin // Dwm.Mat
+        if (reset) begin
+            csr_dwm_mat[i] <= 2'b0;
+        end
+        else if (csr_we && csr_num==`CSR_DWM0+i) begin
+            csr_dwm_mat[i] <= csr_wmask[`CSR_DWM_MAT] & csr_wdata[`CSR_DWM_MAT]
+                            | ~csr_wmask[`CSR_DWM_MAT] & csr_dwm_mat[i];
+        end
+    end
+
+    assign csr_dwm_rvalue[i] = {csr_dwm_vseg[i], 1'b0, csr_dwm_pseg[i], 19'b0, csr_dwm_mat[i], csr_dwm_plv3[i], 2'b0,csr_dwm_plv0[i]};
+
+
+    // TLBELO
+    always @(posedge clk) begin // TLBELO.V, TLBELO.D, TLBELO.PLV, TLBELO.G
+        if (reset) begin
+            csr_tlbelo_v[i] <= 1'b0;
+            csr_tlbelo_d[i] <= 1'b0;
+            csr_tlbelo_plv[i] <= 2'b0;
+            csr_tlbelo_g[i] <= 1'b0;
+        end
+        else if (csr_we && csr_num==`CSR_TLBELO0+i) begin
+            csr_tlbelo_v[i] <= csr_wmask[`CSR_TLBELO_V] & csr_wdata[`CSR_TLBELO_V]
+                            | ~csr_wmask[`CSR_TLBELO_V] & csr_tlbelo_v[i];
+            csr_tlbelo_d[i] <= csr_wmask[`CSR_TLBELO_D] & csr_wdata[`CSR_TLBELO_D]
+                            | ~csr_wmask[`CSR_TLBELO_D] & csr_tlbelo_d[i];
+            csr_tlbelo_plv[i] <= csr_wmask[`CSR_TLBELO_PLV] & csr_wdata[`CSR_TLBELO_PLV]
+                            | ~csr_wmask[`CSR_TLBELO_PLV] & csr_tlbelo_plv[i];
+            csr_tlbelo_g[i] <= csr_wmask[`CSR_TLBELO_G] & csr_wdata[`CSR_TLBELO_G]
+                            | ~csr_wmask[`CSR_TLBELO_G] & csr_tlbelo_g[i];
+        end
+        else if(tlbrd) begin
+            csr_tlbelo_v[i] <= csr_tlbelo_in[i][`CSR_TLBELO_V];
+            csr_tlbelo_d[i] <= csr_tlbelo_in[i][`CSR_TLBELO_D];
+            csr_tlbelo_plv[i] <= csr_tlbelo_in[i][`CSR_TLBELO_PLV];
+            csr_tlbelo_g[i] <= csr_tlbelo_in[i][`CSR_TLBELO_G];
+        end
+
+    end
+
+    always @(posedge clk) begin // TLBELO.PPN
+        if (reset)
+            csr_tlbelo_ppn[i] <= 20'b0;
+        else if (csr_we && csr_num==`CSR_TLBELO0+i)
+            csr_tlbelo_ppn[i] <= csr_wmask[`CSR_TLBELO_PPN] & csr_wdata[`CSR_TLBELO_PPN]
+                            | ~csr_wmask[`CSR_TLBELO_PPN] & csr_tlbelo_ppn[i];
+        else if (tlbrd) 
+            csr_tlbelo_ppn[i] <= csr_tlbelo_in[i][`CSR_TLBELO_PPN];
+    end
+    
+    always @(posedge clk) begin // TLBELO.MAT
+        if (reset) begin
+            csr_tlbelo_mat[i] <= 2'b0;
+        end
+        else if (csr_we && csr_num==`CSR_TLBELO0+i) begin
+            csr_tlbelo_mat[i] <= csr_wmask[`CSR_TLBELO_MAT] & csr_wdata[`CSR_TLBELO_MAT]
+                            | ~csr_wmask[`CSR_TLBELO_MAT] & csr_tlbelo_mat[i];
+        end
+        else if (tlbrd) begin
+            csr_tlbelo_mat[i] <= csr_tlbelo_in[i][`CSR_TLBELO_MAT];
+        end
+    end
+
+    assign csr_tlbelo_rvalue[i] = {4'b0, csr_tlbelo_ppn[i], 1'b0, csr_tlbelo_g[i], csr_tlbelo_mat[i], csr_tlbelo_plv[i], csr_tlbelo_d[i], csr_tlbelo_v[i]};
+
+end
+endgenerate
+
+assign csr_dwm0_value = csr_dwm_rvalue[0];
+assign csr_dwm1_value = csr_dwm_rvalue[1];
+
+// ASID寄存器的赋值
+always @(posedge clk) begin // ASID.ASID
+    if (reset)
+        csr_asid_asid <= 10'b0;
+    else if (csr_we && csr_num==`CSR_ASID)
+        csr_asid_asid <= csr_wmask[`CSR_ASID_ASID] & csr_wdata[`CSR_ASID_ASID]
+                        | ~csr_wmask[`CSR_ASID_ASID] & csr_asid_asid;
+    else if (tlbrd) begin
+        csr_asid_asid <= csr_asid_asid_in;
+    end
+end
+assign csr_asid_asidbits = 8'ha; // ASID 域的位宽设置为 10 位
+assign csr_asid_rvalue = {8'b0, csr_asid_asidbits, 6'b0, csr_asid_asid};
+
+
+// TLBEHI
+wire tlbehi_is_pc;
+wire tlbehi_is_vaddr;
+// {TLBR(IF), TLBR(EX), INE, BRK, SYS, ALE, ADEF, PPI(IF), PPI(EX), PME, PIF, PIS, PIL, INT}
+assign tlbehi_is_pc = exception_source[13] || exception_source[3] || exception_source[6];
+assign tlbehi_is_vaddr = exception_source[12] || exception_source[1] || exception_source[2] || exception_source[4] || exception_source[5];
+
+always @(posedge clk) begin // TLBEHI.VPPN
+    if (reset)
+        csr_tlbehi_vppn <= 19'b0;
+// 当触发 TLBR、PIL、PIS、PIF、PME和PPI时，触发例外的虚地址的[31:13]位被记录到这里
+    else if (wb_ex) begin
+        if(tlbehi_is_pc) begin
+            csr_tlbehi_vppn <= wb_pc[31:13];
+        end
+        else if(tlbehi_is_vaddr) begin
+            csr_tlbehi_vppn <= wb_vaddr[31:13];
+        end
+    end
+    else if (csr_we && csr_num==`CSR_TLBEHI)
+        csr_tlbehi_vppn <= csr_wmask[`CSR_TLBEHI_VPPN] & csr_wdata[`CSR_TLBEHI_VPPN]
+                        | ~csr_wmask[`CSR_TLBEHI_VPPN] & csr_tlbehi_vppn;
+    else if (tlbrd) 
+        csr_tlbehi_vppn <= csr_tlbehi_vppn_in;
+end
+assign csr_tlbehi_rvalue = {csr_tlbehi_vppn, 13'b0};
+
+// TLBELO
+assign csr_tlbelo_in[0] = csr_tlbelo0_in; // tlbrd输入
+assign csr_tlbelo_in[1] = csr_tlbelo1_in;
+assign csr_tlbelo0 = csr_tlbelo_rvalue[0]; // tlbrd输出
+assign csr_tlbelo1 = csr_tlbelo_rvalue[1];
+
+// TLBIDX
+always @(posedge clk) begin // TLBIDX.Index, TLBIDX.PS, TLBIDX.NE
+    if (reset) begin
+        csr_tlbidx_index <= 4'b0;
+        csr_tlbidx_ps <= 6'b0;
+        csr_tlbidx_ne <= 1'b0;
+    end
+    else if (csr_we && csr_num==`CSR_TLBIDX) begin
+        csr_tlbidx_index <= csr_wmask[`CSR_TLBIDX_IDX] & csr_wdata[`CSR_TLBIDX_IDX]
+                        | ~csr_wmask[`CSR_TLBIDX_IDX] & csr_tlbidx_index;
+        csr_tlbidx_ps <= csr_wmask[`CSR_TLBIDX_PS] & csr_wdata[`CSR_TLBIDX_PS]
+                        | ~csr_wmask[`CSR_TLBIDX_PS] & csr_tlbidx_ps;
+        csr_tlbidx_ne <= csr_wmask[`CSR_TLBIDX_NE] & csr_wdata[`CSR_TLBIDX_NE]
+                        | ~csr_wmask[`CSR_TLBIDX_NE] & csr_tlbidx_ne;
+    end
+    else if (tlbrd) begin
+        csr_tlbidx_ps <= csr_tlbidx_in[`CSR_TLBIDX_PS];
+        csr_tlbidx_ne <= csr_tlbidx_in[`CSR_TLBIDX_NE];
+    end
+end
+assign csr_tlbidx_rvalue = {csr_tlbidx_ne, 1'b0, csr_tlbidx_ps, 20'b0, csr_tlbidx_index};
+assign csr_tlbidx = {(csr_estat_ecode!=`ECODE_TLBR) & csr_tlbidx_ne, 
+                        1'b0, csr_tlbidx_ps, 20'b0, csr_tlbidx_index};
+
+// TLBRENTRY
+always @(posedge clk) begin // TLBRENTRY.PA
+    if(reset) begin
+        csr_tlbrentry_pa <= 26'b0;
+    end
+    else if(csr_we && csr_num == `CSR_TLBRENTRY) begin
+        csr_tlbrentry_pa <= csr_wmask[`CSR_TLBRENTRY_PA] & csr_wdata[`CSR_TLBRENTRY_PA]
+                        | ~csr_wmask[`CSR_TLBRENTRY_PA] & csr_tlbrentry_pa;
+    end
+end
+assign csr_tlbrentry_rvalue = {csr_tlbrentry_pa, 6'b0};
+
 
 // 读出数据
 assign csr_rvalue = {32{csr_num == `CSR_CRMD}} & csr_crmd_rvalue
@@ -314,9 +599,20 @@ assign csr_rvalue = {32{csr_num == `CSR_CRMD}} & csr_crmd_rvalue
                     | {32{csr_num == `CSR_TID}} & csr_tid_rvalue
                     | {32{csr_num == `CSR_TCFG}} & csr_tcfg_rvalue
                     | {32{csr_num == `CSR_TVAL}} & csr_tval_rvalue
-                    | {32{csr_num == `CSR_TICLR}} & csr_ticlr_rvalue;
+                    | {32{csr_num == `CSR_TICLR}} & csr_ticlr_rvalue
+                    | {32{csr_num == `CSR_DWM0}} & csr_dwm_rvalue[0]
+                    | {32{csr_num == `CSR_DWM1}} & csr_dwm_rvalue[1]
+                    | {32{csr_num == `CSR_ASID}} & csr_asid_rvalue
+                    | {32{csr_num == `CSR_TLBEHI}} & csr_tlbehi_rvalue
+                    | {32{csr_num == `CSR_TLBELO0}} & csr_tlbelo_rvalue[0]
+                    | {32{csr_num == `CSR_TLBELO1}} & csr_tlbelo_rvalue[1]
+                    | {32{csr_num == `CSR_TLBIDX}} & csr_tlbidx_rvalue
+                    | {32{csr_num == `CSR_TLBRENTRY}} & csr_tlbrentry_rvalue;
 
-assign ex_entry = ertn_flush ? csr_era_rvalue : csr_eentry_rvalue; // 异常发生时为异常入口地址，异常返回时为异常返回地址
+
+assign ex_entry = {32{ertn_flush}} & csr_era_rvalue | 
+                  {32{wb_ex}} & ((wb_ecode == `ECODE_TLBR)? csr_tlbrentry_rvalue : csr_eentry_rvalue);
+
 assign has_int = ((csr_estat_is[12:0] & csr_ecfg_lie[12:0]) != 13'b0) && (csr_crmd_ie == 1'b1); // 中断发生信号赋值
 
 endmodule

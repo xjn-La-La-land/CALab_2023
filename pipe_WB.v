@@ -28,10 +28,12 @@ module pipe_WB(
     input  wire [ 2:0] rd_cnt_op_MEM,
     input  wire [31:0] rd_timer_MEM,
 
-    input  wire [ 5:0] exception_source_in,  // {INE, BRK, SYS, ALE, ADEF, INT}
+    input  wire [13:0] exception_source_in,  // {TLBR(IF), TLBR(EX), INE, BRK, SYS, ALE, ADEF, PPI(IF), PPI(EX), PME, PIF, PIS, PIL, INT}
     input  wire [31:0] wb_vaddr_MEM,         // 无效地址
-    
 
+    input  wire [ 2:0] tlbcommand_MEM,
+    input  wire        tlb_flush_MEM,
+    
     output wire        rf_we,          // 用于读写对比
     output reg  [ 4:0] rf_waddr,
     output wire [31:0] rf_wdata,
@@ -50,6 +52,13 @@ module pipe_WB(
     output wire [5:0] wb_ecode,     // 异常类型一级代码
     output wire [8:0] wb_esubcode,  // 异常类型二级代码
     output reg [31:0] wb_vaddr,     // 无效数据地址
+    output reg [13:0] exception_source,
+
+    output wire       tlbrd_out,
+    output wire       tlbwr_out,
+    output wire       tlbfill_out,
+
+    output wire       tlb_flush_out,
 
     output reg [31:0]  PC
 );
@@ -95,14 +104,13 @@ always @(posedge clk) begin
     end
 end
 
-assign rf_we = gr_we && to_valid && ~wb_ex;  // !!异常指令不写回
+assign rf_we = gr_we && to_valid && ~wb_ex && ~tlb_flush_out;  // !!异常指令不写回
 
 
 /* ------------------------------------------------例外处理-------------------------------------------------------*/
-reg       csr_en;
-reg       csr_we;
-reg       ertn_flush;
-reg [5:0] exception_source;
+reg        csr_en;
+reg        csr_we;
+reg        ertn_flush;
 
 always @(posedge clk) begin
     if (reset) begin
@@ -125,12 +133,11 @@ always @(posedge clk) begin
     end
 end
 
-assign csr_we_out = csr_we && valid;
-assign ertn_flush_out = ertn_flush && valid;
+assign csr_we_out = csr_we && ~tlb_flush_out && valid;
+assign ertn_flush_out = ertn_flush && ~tlb_flush_out && valid;
 
 assign rf_wdata = (csr_en || rd_cnt_op[0])       ? csr_rvalue : 
                   (rd_cnt_op[1] || rd_cnt_op[2]) ? rd_timer   : rf_wdata1;
-
 
 always @(posedge clk) begin
     if (reset) begin
@@ -143,10 +150,9 @@ always @(posedge clk) begin
     end
 end
 
-
 always @(posedge clk) begin
     if (reset) begin
-        exception_source <= 6'b0;
+        exception_source <= 14'b0;
         wb_vaddr <= 32'b0;
     end
     else if(data_allowin) begin
@@ -155,16 +161,53 @@ always @(posedge clk) begin
     end
 end
 
-
-assign wb_ex       = (exception_source != 6'b0) && valid;
-assign wb_ecode    = {6{exception_source[5]}} & (`ECODE_INE) |// {INE, BRK, SYS, ALE, ADEF, INT}
-                     {6{exception_source[4]}} & (`ECODE_BRK) |
-                     {6{exception_source[3]}} & (`ECODE_SYS) |
-                     {6{exception_source[2]}} & (`ECODE_ALE) |
-                     {6{exception_source[1]}} & (`ECODE_ADE) |
+assign wb_ex       = (exception_source != 12'b0) && ~tlb_flush_out && valid;
+// {TLBR(IF), TLBR(EX), INE, BRK, SYS, ALE, ADEF, PPI(IF), PPI(EX), PME, PIF, PIS, PIL, INT}
+assign wb_ecode    = {6{exception_source[13] || exception_source[12]}} & (`ECODE_TLBR) |
+                     {6{exception_source[11]}} & (`ECODE_INE)  |
+                     {6{exception_source[10]}} & (`ECODE_BRK)  |
+                     {6{exception_source[9]}} & (`ECODE_SYS)   |
+                     {6{exception_source[8]}} & (`ECODE_ALE)   |
+                     {6{exception_source[7]}} & (`ECODE_ADE)   |
+                     {6{exception_source[6] || exception_source[5]}} & (`ECODE_PPI)   |
+                     {6{exception_source[4]}} & (`ECODE_PME)   |
+                     {6{exception_source[3]}} & (`ECODE_PIF)   |
+                     {6{exception_source[2]}} & (`ECODE_PIS)   |
+                     {6{exception_source[1]}} & (`ECODE_PIL)   |
                      {6{exception_source[0]}} & (`ECODE_INT);
-assign wb_esubcode = `ESUBCODE_ADEF;  // 只支持取指地址错例外，load/store地址出错不检查
 
-assign has_int     = exception_source[0];
+assign wb_esubcode = `ESUBCODE_ADEF;  // 取指地址在adef检查是否对齐，load/store地址在ale检查是否对齐
+
+
+/*-------------------------------------tlb command process------------------------------------*/
+// tlbcommand_MEM = {inst_tlbrd, inst_tlbfill, inst_tlbwr}
+reg tlbrd, tlbwr, tlbfill;
+always @(posedge clk) begin
+    if (reset) begin
+        tlbrd <= 1'b0;
+        tlbwr <= 1'b0;
+        tlbfill <= 1'b0;
+    end
+    else if(data_allowin) begin
+        tlbrd <= tlbcommand_MEM[2];
+        tlbwr <= tlbcommand_MEM[0];
+        tlbfill <= tlbcommand_MEM[1];
+    end
+end
+assign tlbrd_out = tlbrd && ~tlb_flush_out && valid;
+assign tlbwr_out = tlbwr && ~tlb_flush_out && valid;
+assign tlbfill_out = tlbfill && ~tlb_flush_out && valid;
+
+reg tlb_flush;
+always @(posedge clk) begin
+    if (reset) begin
+        tlb_flush <= 1'b0;
+    end
+    else if(data_allowin) begin
+        tlb_flush <= tlb_flush_MEM;
+    end
+end
+assign tlb_flush_out = tlb_flush && valid;
+
 
 endmodule

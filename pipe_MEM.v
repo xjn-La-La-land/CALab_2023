@@ -27,12 +27,17 @@ module pipe_MEM(
 
     input  wire        ex_WB,            // 异常指令到达WB级，清空流水线
     input  wire        flush_WB,         // ertn指令到达WB级，清空流水线
+    input  wire        tlb_flush_WB,     // tlb冲突指令到达WB级，清空流水线
 
     input  wire [ 2:0] rd_cnt_op_EX,     // {inst_rdcntvh_w, inst_rdcntvl_w, inst_rdcntid}
     input  wire [31:0] rd_timer_EX,
 
-    input  wire [5:0]  exception_source_in, // {INE, BRK, SYS, ALE, ADEF, INT}
+    input  wire [13:0] exception_source_in, // {TLBR(IF), TLBR(EX), INE, BRK, SYS, ALE, ADEF, PPI(IF), PPI(EX), PME, PIF, PIS, PIL, INT}
     input  wire [31:0] wb_vaddr_EX,      // 无效地址
+
+    // tlb 信号专用
+    input  wire [2:0]  tlbcommand_EX,
+    input  wire        tlb_flush_EX,
 
     output wire        to_valid,         // IF数据可以发出
     output wire        to_allowin,       // 允许preIF阶段的数据进入
@@ -58,7 +63,11 @@ module pipe_MEM(
 
     output reg [31:0]  wb_vaddr,  // 无效地址
 
-    output reg  [5:0]  exception_source, // {INE, BRK, SYS, ALE, ADEF, INT}
+    output reg [13:0]  exception_source, // {TLBR(IF), TLBR(EX), INE, BRK, SYS, ALE, ADEF, PPI(IF), PPI(EX), PME, PIF, PIS, PIL, INT}
+
+    // tlb 信号专用
+    output reg  [2:0]  tlb_command,
+    output reg         tlb_flush,
 
     output reg [31:0]  PC
 );
@@ -70,8 +79,8 @@ reg  data_sram_req_reg;
 reg  mem_waiting_reg;
 
 assign ready_go = valid && (~data_sram_req_reg || data_sram_data_ok);
-assign to_allowin = !valid || ready_go && from_allowin || ex_WB || flush_WB; 
-assign to_valid = valid & ready_go & ~flush_WB & ~ex_WB;
+assign to_allowin = !valid || ready_go && from_allowin || ex_WB || flush_WB || tlb_flush_WB; 
+assign to_valid = valid & ready_go & ~flush_WB & ~ex_WB & ~tlb_flush_WB;
     
 always @(posedge clk) begin
     if (reset) begin
@@ -224,7 +233,7 @@ assign rd_cnt = (rd_cnt_op != 3'b0);
 
 always @(posedge clk) begin
     if (reset) begin
-        exception_source <= 6'b0;
+        exception_source <= 14'b0;
         wb_vaddr <= 32'b0;
     end
     else if(data_allowin) begin
@@ -233,6 +242,25 @@ always @(posedge clk) begin
     end
 end
 
-assign ex_MEM = (exception_source != 6'b0);
+assign ex_MEM = (exception_source != 14'b0);
+
+// tlb
+always @(posedge clk) begin
+    if (reset) begin
+        tlb_command <= 3'b0;
+    end
+    else if(data_allowin) begin
+        tlb_command <= tlbcommand_EX;
+    end
+end
+
+always @(posedge clk) begin
+    if (reset) begin
+        tlb_flush <= 1'b0;
+    end
+    else if(data_allowin) begin
+        tlb_flush <= tlb_flush_EX;
+    end
+end
 
 endmodule

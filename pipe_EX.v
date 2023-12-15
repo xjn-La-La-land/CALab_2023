@@ -1,3 +1,5 @@
+`include "define.v"
+
 module pipe_EX(
     input  wire        clk,
     input  wire        reset, 
@@ -31,10 +33,34 @@ module pipe_EX(
     input  wire        flush_MEM,
     input  wire        ex_WB,           // 异常指令到达WB级，清空流水线
     input  wire        flush_WB,        // ertn指令到达WB级，清空流水线
+    input  wire        tlb_flush_WB,    // tlb冲突指令到达WB级，清空流水线
 
     input  wire [2:0]  rd_cnt_op_ID,    // {inst_rdcntvh_w, inst_rdcntvl_w, inst_rdcntid}
 
-    input  wire [5:0]  exception_source_in, // 6种异常源 {INE, BRK, SYS, ALE, ADEF, INT}
+    // 访存时需要读取的csr寄存器
+    input  wire [31:0] csr_crmd_value,
+    input  wire [31:0] csr_dwm0_value,
+    input  wire [31:0] csr_dwm1_value,
+
+    // tlb 指令专用信号
+    input  wire [4:0]  tlbcommand_ID,      // TLBSRCH指令信号
+    input  wire [4:0]  invtlb_op_ID,          // TLBINV指令信号
+    input  wire [9:0]  csr_asid_asid,   // ASID域
+    input  wire [18:0] csr_tlbehi_vppn,  // TLBEHI域
+
+    input  wire        tlb_flush_ID,
+
+    // tlb 查询结果
+    input  wire        tlb_found,
+    input  wire [ 3:0] tlb_index,
+    input  wire [19:0] tlb_ppn,
+    input  wire [ 5:0] tlb_ps,
+    input  wire [ 1:0] tlb_plv,
+    input  wire [ 1:0] tlb_mat,
+    input  wire        tlb_d,
+    input  wire        tlb_v,
+     
+    input  wire [13:0] exception_source_in, // {TLBR(IF), TLBR(EX), INE, BRK, SYS, ALE, ADEF, PPI(IF), PPI(EX), PME, PIF, PIS, PIL, INT}
 
     output wire        to_valid,       // IF数据可以发出
     output wire        to_allowin,     // 允许preIF阶段的数据进入
@@ -58,8 +84,8 @@ module pipe_EX(
     output reg [13:0]  csr_num,
     output wire        csr_en_out,
     output wire        csr_we_out,
-    output reg [31:0]  csr_wmask,
-    output reg [31:0]  csr_wdata,
+    output wire [31:0] csr_wmask_out,
+    output wire [31:0] csr_wdata_out,
 
     output wire        ertn_flush_out,    // ertn指令，清空流水线
 
@@ -69,7 +95,19 @@ module pipe_EX(
 
     output wire [31:0] wb_vaddr,          // 无效地址
 
-    output wire [5:0]  exception_source,  // {INE, BRK, SYS, ALE, ADEF, INT}
+    output wire [13:0] exception_source,  // {TLBR(IF), TLBR(EX), INE, BRK, SYS, ALE, ADEF, PPI(IF), PPI(EX), PME, PIF, PIS, PIL, INT}
+
+    // tlb 指令专用信号
+    output reg  [2:0]  tlb_command,
+    // tlb 查询输入
+    output  wire [18:0] tlb_vppn,
+    output  wire        tlb_va_bit12,
+    output  wire [ 9:0] tlb_asid,
+
+    output wire        invtlb_valid,
+    output reg  [4:0]  invtlb_op,  
+
+    output reg         tlb_flush,
 
     output reg  [31:0] PC
 );
@@ -78,8 +116,7 @@ module pipe_EX(
 wire       ready_go;              // 数据处理完成信号
 reg        valid;
 reg [31:0] mem_wdata;
-wire       data_sram_req_valid;   // 访存请求有效信号
-// reg        data_sram_addr_ok_hold;
+wire       req_valid;   // 访存请求有效信号
 
 // 33-bit multiplier
 wire op_mul_w;      //32-bit signed multiplication
@@ -93,7 +130,6 @@ wire [65:0] multiplier_result;
 
 reg  [31:0] mul_result;
 reg         mul_ready;
-
 
 // 32-bit divider
 wire        div_en;
@@ -112,10 +148,15 @@ reg         clear_valid;
 wire [63:0] div_result_signed;
 wire [63:0] div_result_unsigned;
 
+wire        wait_div;
+
+// tlbsrch_op result
+wire [31:0] tlbsrch_result;
+
 
 assign ready_go = valid & ~wait_div & ~(mul_en & ~mul_ready) & (~data_sram_req || data_sram_addr_ok);
-assign to_allowin = !valid || ready_go && from_allowin || ex_WB || flush_WB; 
-assign to_valid = valid & ready_go & ~flush_WB & ~ex_WB;
+assign to_allowin = !valid || ready_go && from_allowin || ex_WB || flush_WB || tlb_flush_WB; 
+assign to_valid = valid & ready_go & ~flush_WB & ~ex_WB & ~tlb_flush_WB;
     
 always @(posedge clk) begin
     if (reset) begin
@@ -128,18 +169,6 @@ end
 
 wire data_allowin; // 拉手成功，数据可以进入
 assign data_allowin = from_valid && to_allowin;
-
-// always @(posedge clk) begin
-//     if(reset) begin
-//         data_sram_addr_ok_hold <= 1'b0;
-//     end
-//     else if(data_sram_addr_ok) begin
-//         data_sram_addr_ok_hold <= 1'b1;
-//     end
-//     else if(from_valid) begin
-//         data_sram_addr_ok_hold <= 1'b0;
-//     end
-// end
 
 always @(posedge clk) begin
     if (reset) begin
@@ -200,12 +229,53 @@ always @(posedge clk) begin
     end
 end
 
-assign data_sram_req = ((load_op != 5'b0) || (store_op != 3'b0)) && from_allowin && data_sram_req_valid;
+
+// 访存 虚地址----->物理地址 转换过程
+wire [31:0] data_vaddr = alu_result;
+wire [ 1:0] plv = csr_crmd_value[`CSR_CRMD_PLV];
+wire        da  = csr_crmd_value[`CSR_CRMD_DA];
+wire        pg  = csr_crmd_value[`CSR_CRMD_PG];
+
+// 直接地址翻译
+wire [31:0] direct_data_paddr = data_vaddr;
+wire        direct_data_paddr_v = ({pg, da} == 2'b01); // valid
+
+// 直接映射窗口地址翻译
+wire        dwm0_plv0 = csr_dwm0_value[`CSR_DWM_PLV0];
+wire        dwm0_plv3 = csr_dwm0_value[`CSR_DWM_PLV3];
+wire [ 2:0] dwm0_pseg = csr_dwm0_value[`CSR_DWM_PSEG];
+wire [ 2:0] dwm0_vseg = csr_dwm0_value[`CSR_DWM_VSEG];
+wire        dwm1_plv0 = csr_dwm1_value[`CSR_DWM_PLV0];
+wire        dwm1_plv3 = csr_dwm1_value[`CSR_DWM_PLV3];
+wire [ 2:0] dwm1_pseg = csr_dwm1_value[`CSR_DWM_PSEG];
+wire [ 2:0] dwm1_vseg = csr_dwm1_value[`CSR_DWM_VSEG];
+
+wire [31:0] dwm0_data_paddr = {dwm0_pseg, data_vaddr[28:0]};
+wire [31:0] dwm1_data_paddr = {dwm1_pseg, data_vaddr[28:0]};
+wire        dwm0_data_paddr_v = ((plv == 2'b00) && dwm0_plv0 || (plv == 2'b11) && dwm0_plv3) &&
+                                (dwm0_vseg == data_vaddr[31:29]) &&
+                                ({pg, da} == 2'b10);
+wire        dwm1_data_paddr_v = ((plv == 2'b00) && dwm1_plv0 || (plv == 2'b11) && dwm1_plv3) &&
+                                (dwm1_vseg == data_vaddr[31:29]) &&
+                                ({pg, da} == 2'b10);
+
+// TLB地址翻译
+wire [31:0] tlb_data_paddr = {32{tlb_ps == 6'd12}} & {tlb_ppn, data_vaddr[11:0]} | {32{tlb_ps == 6'd21}} & {tlb_ppn[19:9], data_vaddr[20:0]};
+wire        tlb_data_paddr_v = tlb_found && ({pg, da} == 2'b10) && (!dwm0_data_paddr_v && !dwm1_data_paddr_v);
+
+
+wire [31:0] data_paddr = {32{direct_data_paddr_v}} & direct_data_paddr |
+                         {32{dwm0_data_paddr_v}} & dwm0_data_paddr |
+                         {32{dwm1_data_paddr_v}} & dwm1_data_paddr |
+                         {32{tlb_data_paddr_v}} & tlb_data_paddr;
+
+
+
+assign data_sram_req = ((load_op != 5'b0) || (store_op != 3'b0)) && from_allowin && req_valid;
 assign data_sram_wr  = (store_op != 3'b0);
 assign data_sram_size = {2{load_op[4] | load_op[3] | store_op[2]}} & 2'b00 |
                         {2{load_op[2] | load_op[1] | store_op[1]}} & 2'b01 |
                         {2{load_op[0] | store_op[0]}} & 2'b10;
-
 
 assign st_b_strb = {4{alu_result1[1:0]==2'b00}} & {4'b0001} |
                     {4{alu_result1[1:0]==2'b01}} & {4'b0010} |
@@ -217,10 +287,10 @@ assign st_w_strb = 4'b1111;
 assign data_sram_wstrb = {4{store_op[2]}} & st_b_strb |
                          {4{store_op[1]}} & st_h_strb |
                          {4{store_op[0]}} & st_w_strb;
-
-assign data_sram_addr  = alu_result;  // !!!类sram总线的addr不需要4byte对齐！！！
-
+assign data_sram_addr  = data_paddr;  // !!!类sram总线的addr不需要4byte对齐！！！
 assign data_sram_wdata = mem_wdata;
+
+
 
 alu u_alu(
     .alu_op     (alu_op[11:0]),
@@ -311,9 +381,11 @@ assign wait_div = div_en & ~div_out_valid_signed & ~div_out_valid_unsigned & ~fl
 
 /* ------------------------------------------------例外处理-------------------------------------------------------*/
 
-reg     csr_en;
-reg     csr_we;
-reg     ertn_flush;
+reg         csr_en;
+reg         csr_we;
+reg         ertn_flush;
+reg [31:0]  csr_wmask;
+reg [31:0]  csr_wdata;
 
 always @(posedge clk) begin
     if (reset) begin
@@ -339,10 +411,10 @@ end
 assign csr_en_out = csr_en && valid;
 assign csr_we_out = csr_we && valid;
 assign ertn_flush_out = ertn_flush && valid;
+assign csr_wmask_out = (tlbsrch)?{1'b1, 27'b0, 4'hf} : csr_wmask; 
+assign csr_wdata_out = (tlbsrch)?tlbsrch_result : csr_wdata;
 
-// load/store访存地址非对齐例外检测
-wire   ex_ale = (((load_op[2:1] != 2'b00 || store_op[1] == 1'b1) && (alu_result[0] != 1'b0))
-                | ((load_op[0] == 1'b1 || store_op[0] == 1'b1) && (alu_result[1:0] != 2'b00))) && valid;
+
 assign wb_vaddr = alu_result;
 
 
@@ -365,22 +437,91 @@ assign rd_cnt = (rd_cnt_op != 3'b0);
 assign rd_timer = (rd_cnt_op[1]) ? timer[31:0]  :
                   (rd_cnt_op[2]) ? timer[63:32] : 32'b0;
 
-reg [5:0] exception_source_old;
+
+
+// EX级产生的异常信号
+reg  [13:0] exception_source_ID;  // ID级传入的exception source
+wire ex_ale; // 地址非对齐例外
+wire ex_pil; // load 操作页无效例外
+wire ex_pis; // store 操作页无效例外
+wire ex_ppi_EX; // 页特权等级不合规例外(EX级)
+wire ex_pme; // 页修改例外
+wire ex_tlbr_EX; // TLB 重填例外(EX级)
+
+
+assign ex_ale = (((load_op[2:1] != 2'b00 || store_op[1] == 1'b1) && (alu_result[0] != 1'b0))
+                | ((load_op[0] == 1'b1 || store_op[0] == 1'b1) && (alu_result[1:0] != 2'b00))) 
+                && valid;
+assign ex_pil = (load_op != 5'b0) && tlb_data_paddr_v 
+                && tlb_found && (!tlb_v) && valid;
+assign ex_pis = (store_op != 3'b0) && tlb_data_paddr_v 
+                && tlb_found && (!tlb_v) && valid;
+assign ex_ppi_EX = (load_op != 5'b0 || store_op != 3'b0) && tlb_data_paddr_v 
+                && tlb_found && tlb_v && (plv == 2'b11) && (tlb_plv == 2'b00) && valid;
+assign ex_pme = (store_op != 3'b0) && tlb_data_paddr_v 
+                && tlb_found && tlb_v && (!ex_ppi_EX) && (!tlb_d) && valid;
+assign ex_tlbr_EX = (load_op != 5'b0 || store_op != 3'b0) && 
+                    (!direct_data_paddr_v) && (!dwm0_data_paddr_v) && (!dwm1_data_paddr_v) && (!tlb_data_paddr_v) && valid;
+
+
 always @(posedge clk)begin
     if(reset)begin
-        exception_source_old <= 6'b0;
+        exception_source_ID <= 14'b0;
     end
     else if(data_allowin)begin
-        exception_source_old <= exception_source_in;
+        exception_source_ID <= exception_source_in;
+    end
+end
+// {TLBR(IF), TLBR(EX), INE, BRK, SYS, ALE, ADEF, PPI(IF), PPI(EX), PME, PIF, PIS, PIL, INT}
+assign exception_source = exception_source_ID | {1'b0, ex_tlbr_EX, 3'b0, ex_ale, 2'b0, ex_ppi_EX, ex_pme, 1'b0, ex_pis, ex_pil, 1'b0};
+
+/*-------------------------- tlb 查询 -------------------------------*/
+reg tlbsrch;
+reg invtlb;
+
+always @(posedge clk) begin
+    if (reset) begin
+        tlbsrch <= 1'b0;
+        invtlb <= 1'b0;
+        tlb_command <= 3'b0;
+        invtlb_op <= 5'b0;
+    end
+    else if(data_allowin) begin
+        tlbsrch <= tlbcommand_ID[0]; 
+        invtlb <= tlbcommand_ID[4];
+        tlb_command <= tlbcommand_ID[3:1]; // tlbfill, tlbwr
+        invtlb_op <= invtlb_op_ID; // TLBINV指令信号
     end
 end
 
-assign exception_source = {exception_source_old[5:3], ex_ale, exception_source_old[1:0]};
+assign tlb_vppn = {19{tlbsrch}} & csr_tlbehi_vppn
+                | {19{invtlb}} & alu_src2[31:13]
+                | {19{(load_op != 5'b0)||(store_op != 3'b0)}} & data_vaddr[31:13];
+assign tlb_va_bit12 = invtlb & alu_src2[12]
+                    | {(load_op != 5'b0)||(store_op != 3'b0)} & data_vaddr[12];
+assign tlb_asid = {10{tlbsrch || (load_op != 5'b0)||(store_op != 3'b0)}} & csr_asid_asid
+                | {10{invtlb}} & alu_src1[9:0];
+
+assign tlbsrch_result = {~tlb_found, 27'b0, tlb_index};  
+assign invtlb_valid = invtlb & req_valid;
+
+always @(posedge clk) begin
+    if (reset) begin
+        tlb_flush <= 1'b0;
+    end
+    else if(data_allowin) begin
+        tlb_flush <= tlb_flush_ID;
+    end
+end
+
+/*-------------------------------------------------------------------*/
 
 // store指令若要发出访存请求，需要检查EX、MEM、WB级是否有异常或ertn
-assign data_sram_req_valid = valid &&
-                             (exception_source == 6'b0) &&
-                             (~ex_MEM && ~flush_MEM) &&
-                             (~ex_WB && ~flush_WB);
+// invtlb指令如果要发起修改tlb请求，需要检查EX、MEM、WB级是否有异常或ertn
+assign req_valid =  (exception_source == 14'b0) &&
+                    (~ex_MEM && ~flush_MEM) &&
+                    (~ex_WB && ~flush_WB) &&
+                    (~tlb_flush) &&
+                    valid;
 
 endmodule
