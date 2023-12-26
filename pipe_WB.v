@@ -133,8 +133,8 @@ always @(posedge clk) begin
     end
 end
 
-assign csr_we_out = csr_we && ~tlb_flush_out && valid;
-assign ertn_flush_out = ertn_flush && ~tlb_flush_out && valid;
+assign csr_we_out = csr_we && ~tlb_flush_out && valid ;
+assign ertn_flush_out = ertn_flush && ~tlb_flush_out && valid && ~wb_ex;
 
 assign rf_wdata = (csr_en || rd_cnt_op[0])       ? csr_rvalue : 
                   (rd_cnt_op[1] || rd_cnt_op[2]) ? rd_timer   : rf_wdata1;

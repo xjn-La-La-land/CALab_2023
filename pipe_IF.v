@@ -22,7 +22,7 @@ module pipe_IF(
     // from/to指令RAM
     output wire        inst_sram_req,
     output wire        inst_sram_wr,
-    output wire [ 1:0] inst_sram_size,
+    output wire [ 2:0] inst_sram_size,
     output wire [ 3:0] inst_sram_wstrb,
     output wire [31:0] inst_sram_addr,
     output wire [31:0] inst_sram_wdata,
@@ -48,6 +48,9 @@ module pipe_IF(
     output wire [18:0] tlb_vppn,
     output wire        tlb_va_bit12,
     output wire [ 9:0] tlb_asid,
+
+    // 传给cache的查询信号
+    output wire [11:0] vaddr_offset, 
 
     output wire [13:0] exception_source
     // {TLBR(IF), TLBR(EX), INE, BRK, SYS, ALE, ADEF, PPI(IF), PPI(EX), PME, PIF, PIS, PIL, INT}
@@ -189,6 +192,9 @@ wire [31:0] inst_paddr = {32{direct_inst_paddr_v}} & direct_inst_paddr |
                          {32{dwm1_inst_paddr_v}} & dwm1_inst_paddr |
                          {32{tlb_inst_paddr_v}} & tlb_inst_paddr;
 
+// cache需要的地址低位信号
+assign vaddr_offset = inst_vaddr[11:0];
+
 // 取指例外信号赋值
 assign ex_adef = (inst_vaddr[1:0] != 2'b00);
 assign ex_pif = tlb_inst_paddr_v && (!tlb_v);
@@ -199,9 +205,9 @@ assign ex_tlbr_IF = (!direct_inst_paddr_v) && (!dwm0_inst_paddr_v) && (!dwm1_ins
 assign exception_source = {ex_tlbr_IF, 5'b0, ex_adef, ex_ppi_IF, 2'b0, ex_pif, 3'b0};
 
 
-assign inst_sram_req   = (state == WAIT_ADDR_OK && exception_source == 14'b0);  // 等待valid信号拉高后再�?始取�?
+assign inst_sram_req   = (state == WAIT_ADDR_OK && exception_source == 14'b0);  // 等待valid信号拉高后再开始取指令
 assign inst_sram_wr    = 1'b0;
-assign inst_sram_size  = 2'b10;  // 4bytes
+assign inst_sram_size  = 3'b10;  // 4bytes
 assign inst_sram_wstrb = 4'b0;
 assign inst_sram_addr  = inst_paddr;
 assign inst_sram_wdata = 32'b0;

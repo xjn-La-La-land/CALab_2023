@@ -64,8 +64,8 @@ module mycpu_top(
 
     // inst sram interface
     wire        inst_sram_req;    // 指令RAM读写请求信号
-    wire        inst_sram_wr;     // �?1表示是写请求，为0表示是读请求(指令RAM恒为0)
-    wire [ 1:0] inst_sram_size;   // 请求传输的字节数�?0: 1 byte�?1: 2 bytes�?2: 4 bytes
+    wire        inst_sram_wr;     // 1表示是写请求，为0表示是读请求(指令RAM恒为0)
+    wire [ 2:0] inst_sram_size;   // 请求传输的字节数0: 1 byte, 1: 2 bytes, 2: 4 bytes
     wire [ 3:0] inst_sram_wstrb;  // 写请求的字节写使�?
     wire [31:0] inst_sram_addr;   // 读写请求的地�?
     wire [31:0] inst_sram_wdata;  // 写请求的写数�?(指令RAM恒为0)
@@ -282,6 +282,18 @@ module mycpu_top(
     wire        tlb_r_d1;
     wire        tlb_r_v1;
 
+    // cache相关信号
+    wire [11:0]  inst_vaddr_offset;
+
+    wire         icache_rd_req;
+    wire [ 2:0]  icache_rd_type;
+    wire [31:0]  icache_rd_addr;
+
+    wire         icache_rd_rdy;
+    wire         icache_ret_valid;
+    wire         icache_ret_last;
+    wire [31:0]  icache_ret_data;
+       
 
     pipe_IF u_pipe_IF(
         .clk          (clk),
@@ -330,6 +342,8 @@ module mycpu_top(
         .tlb_vppn(tlb_s0_vppn),
         .tlb_va_bit12(tlb_s0_va_bit12),
         .tlb_asid(tlb_s0_asid),
+
+        .vaddr_offset(inst_vaddr_offset),
 
         .exception_source(exception_source_IF)
     );
@@ -718,148 +732,186 @@ module mycpu_top(
     );
 
     sram_to_axi_bridge bridge(
-    
-    .aclk               (clk),
-    .areset             (reset),
+        
+        .aclk               (clk),
+        .areset             (reset),
 
-    .inst_sram_req      (inst_sram_req),
-    .inst_sram_wr       (inst_sram_wr),     
-    .inst_sram_size     (inst_sram_size),   
-    .inst_sram_wstrb    (inst_sram_wstrb),  
-    .inst_sram_addr     (inst_sram_addr),    
-    .inst_sram_wdata    (inst_sram_wdata),    
-    .inst_sram_addr_ok  (inst_sram_addr_ok),
-    .inst_sram_data_ok  (inst_sram_data_ok),
-    .inst_sram_rdata    (inst_sram_rdata),
+        .inst_sram_req      (icache_rd_req), // 修改到cache
+        .inst_sram_wr       (1'b0),      
+        .inst_sram_size     (icache_rd_type),   
+        .inst_sram_wstrb    (4'b0),  
+        .inst_sram_addr     (icache_rd_addr),    
+        .inst_sram_wdata    (32'b0),    
+        .inst_sram_addr_ok  (icache_rd_rdy),
+        .inst_sram_data_ok  (icache_ret_valid),
+        .inst_sram_rdata    (icache_ret_data),
+        .inst_sram_rlast    (icache_ret_last),
 
-    .data_sram_req      (data_sram_req),    
-    .data_sram_wr       (data_sram_wr),     
-    .data_sram_size     (data_sram_size),   
-    .data_sram_wstrb    (data_sram_wstrb),  
-    .data_sram_addr     (data_sram_addr),
-    .data_sram_wdata    (data_sram_wdata),
-    .data_sram_addr_ok  (data_sram_addr_ok),
-    .data_sram_data_ok  (data_sram_data_ok),
-    .data_sram_rdata    (data_sram_rdata),
+        .data_sram_req      (data_sram_req),    
+        .data_sram_wr       (data_sram_wr),     
+        .data_sram_size     (data_sram_size),   
+        .data_sram_wstrb    (data_sram_wstrb),  
+        .data_sram_addr     (data_sram_addr),
+        .data_sram_wdata    (data_sram_wdata),
+        .data_sram_addr_ok  (data_sram_addr_ok),
+        .data_sram_data_ok  (data_sram_data_ok),
+        .data_sram_rdata    (data_sram_rdata),
 
-    .arid               (arid),
-    .araddr             (araddr),
-    .arlen              (arlen),
-    .arsize             (arsize),
-    .arburst            (arburst),
-    .arlock             (arlock),
-    .arcache            (arcache),
-    .arprot             (arprot),
-    .arvalid            (arvalid),
-    .arready            (arready),
+        .arid               (arid),
+        .araddr             (araddr),
+        .arlen              (arlen),
+        .arsize             (arsize),
+        .arburst            (arburst),
+        .arlock             (arlock),
+        .arcache            (arcache),
+        .arprot             (arprot),
+        .arvalid            (arvalid),
+        .arready            (arready),
 
-    .rid                (rid),
-    .rdata              (rdata),
-    .rresp              (rresp),
-    .rlast              (rlast),
-    .rvalid             (rvalid),
-    .rready             (rready),
+        .rid                (rid),
+        .rdata              (rdata),
+        .rresp              (rresp),
+        .rlast              (rlast),
+        .rvalid             (rvalid),
+        .rready             (rready),
 
-    .awid               (awid),
-    .awaddr             (awaddr),
-    .awlen              (awlen),
-    .awsize             (awsize),
-    .awburst            (awburst),
-    .awlock             (awlock),
-    .awcache            (awcache),
-    .awprot             (awprot),
-    .awvalid            (awvalid),
-    .awready            (awready),
+        .awid               (awid),
+        .awaddr             (awaddr),
+        .awlen              (awlen),
+        .awsize             (awsize),
+        .awburst            (awburst),
+        .awlock             (awlock),
+        .awcache            (awcache),
+        .awprot             (awprot),
+        .awvalid            (awvalid),
+        .awready            (awready),
 
-    .wid                (wid),
-    .wdata              (wdata),
-    .wstrb              (wstrb),
-    .wlast              (wlast),
-    .wvalid             (wvalid),
-    .wready             (wready),
+        .wid                (wid),
+        .wdata              (wdata),
+        .wstrb              (wstrb),
+        .wlast              (wlast),
+        .wvalid             (wvalid),
+        .wready             (wready),
 
-    .bid                (bid),
-    .bresp              (bresp),
-    .bvalid             (bvalid),
-    .bready             (bready)
-);
+        .bid                (bid),
+        .bresp              (bresp),
+        .bvalid             (bvalid),
+        .bready             (bready)
+    );
 
-// 实例化 tlb 模块
-// tlbfill 指令随机生成index
-reg [3:0] tlbfill_index;
-wire [3:0] tlb_w_index;
-always @(posedge clk) begin
-    if(reset)
-        tlbfill_index <= 4'b0;
-    else if (tlbfill) 
-        tlbfill_index <= tlbfill_index + 1'b1;
-end
-assign tlb_w_index = (tlbfill)? tlbfill_index : csr_tlbidx[3:0];
-tlb u_tlb (
-    .clk(clk),
-    
-    .s0_vppn(tlb_s0_vppn),
-    .s0_va_bit12(tlb_s0_va_bit12),
-    .s0_asid(tlb_s0_asid),
-    .s0_found(tlb_s0_found),
-    .s0_index(tlb_s0_index),
-    .s0_ppn(tlb_s0_ppn),
-    .s0_ps(tlb_s0_ps),
-    .s0_plv(tlb_s0_plv),
-    .s0_mat(tlb_s0_mat),
-    .s0_d(tlb_s0_d),
-    .s0_v(tlb_s0_v),
+    // 实例化 cache 模块
+    cache u_icache(
+        .clk(clk),
+        .reset(reset),
 
-    .s1_vppn(tlb_s1_vppn),
-    .s1_va_bit12(tlb_s1_va_bit12),
-    .s1_asid(tlb_s1_asid),
-    .s1_found(tlb_s1_found),
-    .s1_index(tlb_s1_index),
-    .s1_ppn(tlb_s1_ppn),
-    .s1_ps(tlb_s1_ps),
-    .s1_plv(tlb_s1_plv),
-    .s1_mat(tlb_s1_mat),
-    .s1_d(tlb_s1_d),
-    .s1_v(tlb_s1_v),
-    
-    .invtlb_valid(tlb_invtlb_valid),
-    .invtlb_op(tlb_invtlb_op),
-    
-    .we(tlbwr | tlbfill),
-    .w_index(tlb_w_index),
-    .w_e(~csr_tlbidx[`CSR_TLBIDX_NE]),
-    .w_vppn(csr_tlbehi_vppn),
-    .w_ps(csr_tlbidx[`CSR_TLBIDX_PS]),
-    .w_asid(csr_asid_asid),
-    .w_g(csr_tlbelo0[`CSR_TLBELO_G] & csr_tlbelo1[`CSR_TLBELO_G]),
-    .w_ppn0(csr_tlbelo0[`CSR_TLBELO_PPN]),
-    .w_plv0(csr_tlbelo0[`CSR_TLBELO_PLV]),
-    .w_mat0(csr_tlbelo0[`CSR_TLBELO_MAT]),
-    .w_d0(csr_tlbelo0[`CSR_TLBELO_D]),
-    .w_v0(csr_tlbelo0[`CSR_TLBELO_V]),
-    .w_ppn1(csr_tlbelo1[`CSR_TLBELO_PPN]),
-    .w_plv1(csr_tlbelo1[`CSR_TLBELO_PLV]),
-    .w_mat1(csr_tlbelo1[`CSR_TLBELO_MAT]),
-    .w_d1(csr_tlbelo1[`CSR_TLBELO_D]),
-    .w_v1(csr_tlbelo1[`CSR_TLBELO_V]),
-    
-    .r_index(csr_tlbidx[3:0]),
-    .r_e(tlb_r_e),
-    .r_vppn(tlb_r_vppn),
-    .r_ps(tlb_r_ps),
-    .r_asid(tlb_r_asid),
-    .r_g(tlb_r_g),
-    .r_ppn0(tlb_r_ppn0),
-    .r_plv0(tlb_r_plv0),
-    .r_mat0(tlb_r_mat0),
-    .r_d0(tlb_r_d0),
-    .r_v0(tlb_r_v0),
-    .r_ppn1(tlb_r_ppn1),
-    .r_plv1(tlb_r_plv1),
-    .r_mat1(tlb_r_mat1),
-    .r_d1(tlb_r_d1),
-    .r_v1(tlb_r_v1)
-);
+        .valid(inst_sram_req),
+        .op(inst_sram_wr),
+        .index(inst_vaddr_offset[11:4]),
+        .tag(inst_sram_addr[31:12]),
+        .offset(inst_vaddr_offset[3:0]),
+        .wstrb(inst_sram_wstrb),
+        .wdata(inst_sram_wdata),
+
+        .addr_ok(inst_sram_addr_ok),
+        .data_ok(inst_sram_data_ok),
+        .rdata(inst_sram_rdata),
+
+        .rd_req(icache_rd_req),
+        .rd_type(icache_rd_type),
+        .rd_addr(icache_rd_addr),
+
+        .rd_rdy(icache_rd_rdy),
+        .ret_valid(icache_ret_valid),
+        .ret_last(icache_ret_last),
+        .ret_data(icache_ret_data),
+
+        .wr_req(),
+        .wr_type(),
+        .wr_addr(),
+        .wr_wstrb(),
+        .wr_data(),
+
+        .wr_rdy()
+    );
+
+    // 实例化 tlb 模块
+    // tlbfill 指令随机生成index
+    reg [3:0] tlbfill_index;
+    wire [3:0] tlb_w_index;
+    always @(posedge clk) begin
+        if(reset)
+            tlbfill_index <= 4'b0;
+        else if (tlbfill) 
+            tlbfill_index <= tlbfill_index + 1'b1;
+    end
+    assign tlb_w_index = (tlbfill)? tlbfill_index : csr_tlbidx[3:0];
+    tlb u_tlb (
+        .clk(clk),
+
+        .s0_vppn(tlb_s0_vppn),
+        .s0_va_bit12(tlb_s0_va_bit12),
+        .s0_asid(tlb_s0_asid),
+        .s0_found(tlb_s0_found),
+        .s0_index(tlb_s0_index),
+        .s0_ppn(tlb_s0_ppn),
+        .s0_ps(tlb_s0_ps),
+        .s0_plv(tlb_s0_plv),
+        .s0_mat(tlb_s0_mat),
+        .s0_d(tlb_s0_d),
+        .s0_v(tlb_s0_v),
+
+        .s1_vppn(tlb_s1_vppn),
+        .s1_va_bit12(tlb_s1_va_bit12),
+        .s1_asid(tlb_s1_asid),
+        .s1_found(tlb_s1_found),
+        .s1_index(tlb_s1_index),
+        .s1_ppn(tlb_s1_ppn),
+        .s1_ps(tlb_s1_ps),
+        .s1_plv(tlb_s1_plv),
+        .s1_mat(tlb_s1_mat),
+        .s1_d(tlb_s1_d),
+        .s1_v(tlb_s1_v),
+
+        .invtlb_valid(tlb_invtlb_valid),
+        .invtlb_op(tlb_invtlb_op),
+
+        .we(tlbwr | tlbfill),
+        .w_index(tlb_w_index),
+        .w_e(~csr_tlbidx[`CSR_TLBIDX_NE]),
+        .w_vppn(csr_tlbehi_vppn),
+        .w_ps(csr_tlbidx[`CSR_TLBIDX_PS]),
+        .w_asid(csr_asid_asid),
+        .w_g(csr_tlbelo0[`CSR_TLBELO_G] & csr_tlbelo1[`CSR_TLBELO_G]),
+        .w_ppn0(csr_tlbelo0[`CSR_TLBELO_PPN]),
+        .w_plv0(csr_tlbelo0[`CSR_TLBELO_PLV]),
+        .w_mat0(csr_tlbelo0[`CSR_TLBELO_MAT]),
+        .w_d0(csr_tlbelo0[`CSR_TLBELO_D]),
+        .w_v0(csr_tlbelo0[`CSR_TLBELO_V]),
+        .w_ppn1(csr_tlbelo1[`CSR_TLBELO_PPN]),
+        .w_plv1(csr_tlbelo1[`CSR_TLBELO_PLV]),
+        .w_mat1(csr_tlbelo1[`CSR_TLBELO_MAT]),
+        .w_d1(csr_tlbelo1[`CSR_TLBELO_D]),
+        .w_v1(csr_tlbelo1[`CSR_TLBELO_V]),
+
+        .r_index(csr_tlbidx[3:0]),
+        .r_e(tlb_r_e),
+        .r_vppn(tlb_r_vppn),
+        .r_ps(tlb_r_ps),
+        .r_asid(tlb_r_asid),
+        .r_g(tlb_r_g),
+        .r_ppn0(tlb_r_ppn0),
+        .r_plv0(tlb_r_plv0),
+        .r_mat0(tlb_r_mat0),
+        .r_d0(tlb_r_d0),
+        .r_v0(tlb_r_v0),
+        .r_ppn1(tlb_r_ppn1),
+        .r_plv1(tlb_r_plv1),
+        .r_mat1(tlb_r_mat1),
+        .r_d1(tlb_r_d1),
+        .r_v1(tlb_r_v1)
+    );
+
+        
 
     // debug info generate
     assign debug_wb_pc       = pc_WB;

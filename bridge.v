@@ -9,17 +9,18 @@ module sram_to_axi_bridge(
     // inst sram interface
     input wire         inst_sram_req,    // ???RAM???????????
     input wire         inst_sram_wr,     // ?1????????????0??????????(???RAM???0)
-    input wire  [ 1:0] inst_sram_size,   // ??????????????0: 1 byte??1: 2 bytes??2: 4 bytes
+    input wire  [ 2:0] inst_sram_size,   // 0: 1 byte; 1: 2 bytes; 2: 4 bytes; 4: 16 bytes
     input wire  [ 3:0] inst_sram_wstrb,  // ???????????????
     input wire  [31:0] inst_sram_addr,   // ???????????
     input wire  [31:0] inst_sram_wdata,  // ?????????????(???RAM???0)
     output wire        inst_sram_addr_ok,// ??????????????OK??????????????????????????????????
     output wire        inst_sram_data_ok,// ???????????????OK?????????????????????????????
     output wire [31:0] inst_sram_rdata,  // ?????????????
+    output wire        inst_sram_rlast,
     // data sram interface
     input wire         data_sram_req,
     input wire         data_sram_wr,
-    input wire  [ 1:0] data_sram_size,
+    input wire  [ 2:0] data_sram_size,
     input wire  [ 3:0] data_sram_wstrb,
     input wire  [31:0] data_sram_addr,
     input wire  [31:0] data_sram_wdata,
@@ -70,8 +71,12 @@ module sram_to_axi_bridge(
     
 );
 
+/*
+    注：icache新增加读通道的burst功能，并未实现写通道的burst
+*/
+
 //constant
-assign arlen    = 0;
+assign arlen    = (arsize_r == 3'b100)?8'h3:8'h0; // burst 情况下进行4拍读操作
 assign arburst  = 2'b01;
 assign arlock   = 2'b00;
 assign arcache  = 4'b0000;
@@ -101,13 +106,17 @@ wire [31:0] rreq_addr;
 
 assign arvalid = arvalid_r;
 assign arid = arid_r;
-assign arsize = arsize_r;
+assign arsize = (arsize_r == 3'b100)? 3'b010 : arsize_r; // burst 情况下设置为10
 assign araddr = (rreq_addr == `EX_ENTRY) ? `EX_ENTRY : araddr_r;
+
 assign read_req = inst_sram_req && !inst_sram_wr || data_sram_req && !data_sram_wr;
 assign read_from_data = data_sram_req && !data_sram_wr && arid != `INST_ID;
+assign read_block = (cnt != 3'b0) || (rready && rvalid && !rlast); // 两种读阻塞情况：1. 写入的数据还没有被RAM收到；2. 读取的数据还没有传输完成
 assign rreq_id = read_from_data ? `DATA_ID : `INST_ID;
 assign rreq_size = read_from_data ? data_sram_size : inst_sram_size;
 assign rreq_addr = read_from_data ? data_sram_addr : inst_sram_addr;
+
+assign inst_sram_rlast = rready && rvalid && rlast; // 读指令RAM的last信号，向外传递给cache
 
 always @(posedge aclk) begin
     if (areset) begin
@@ -120,7 +129,7 @@ always @(posedge aclk) begin
         arid_r    <= rreq_id;
         arsize_r  <= rreq_size;
         araddr_r  <= rreq_addr;
-    end else if (arvalid && arready) begin
+    end else if (arvalid && arready) begin // burst 情况下需要考虑是否是最后一个数据传输完成
         arvalid_r <= 1'b0;
         arid_r    <= 4'b0010;
         arsize_r  <= 3'h0;
@@ -191,14 +200,15 @@ assign bready = 1'b1;
 assign data_sram_wreq_shake = awvalid && awready;
 assign data_sram_wresp_shake = bvalid && bready;
 
+// 为防止写入的数据为传递到RAM，就被读取，需要保证接收到RAM已经接收此数据的响应信号后才能允许下一次读
 reg [2:0] cnt;
-assign read_block = cnt != 3'b0;
-
 always @(posedge aclk) begin
     if (areset) begin
         cnt <= 3'b0;
+    // 如果请求已经发送，但是还没有被RAM收到，就不允许下一次读取
     end else if (data_sram_wreq_shake && !data_sram_wresp_shake) begin
         cnt <= cnt + 1;
+    // 如果过去的请求被RAM收到，就将cnt减1
     end else if (!data_sram_wreq_shake && data_sram_wresp_shake) begin
         cnt <= cnt - 1;
     end

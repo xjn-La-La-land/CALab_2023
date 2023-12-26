@@ -1,6 +1,6 @@
 module cache(
     input wire        clk,
-    input wire        resetn,
+    input wire        reset,
 
     /* cache 模块与 CPU 流水线的交互接口 */
     input wire        valid,  // CPU 访问cache 请求的有效信号
@@ -105,11 +105,6 @@ localparam WRITE_BLOCK    = 3'b100;
     input         ena,    // 片选信号
     input  [ 3:0] wea     // 字节写使能信号
 */
-
-reg         reset;
-always @(posedge clk)begin
-    reset <= ~resetn;
-end
 
 // tagv_ram 和 data_bank_ram 的输入输出信号
 wire [ 7:0] tagv_addr;
@@ -273,7 +268,7 @@ assign way0_load_word = way0_load_block[reg_offset[3:2]*32 +: 32];
 assign way1_load_word = way1_load_block[reg_offset[3:2]*32 +: 32];
 assign load_res = {32{way0_hit}} & way0_load_word |
                   {32{way1_hit}} & way1_load_word |
-                  {32{~cache_hit}} & ret_data;
+                  {32{current_state == REFILL}} & ret_data;
 
 
 // LFSR 线性反馈移位寄存器
@@ -449,8 +444,8 @@ assign refill_word = ((refill_word_counter == reg_offset[3:2]) && (reg_op == WRI
 // tagv ram 的输入信号生成
 assign tagv_w0_en = lookup_en || ((replace || refill) && (replace_way == 1'b0));
 assign tagv_w1_en = lookup_en || ((replace || refill) && (replace_way == 1'b1));
-assign tagv_w0_we = refill && (replace_way == 1'b0);
-assign tagv_w1_we = refill && (replace_way == 1'b1);
+assign tagv_w0_we = refill && (replace_way == 1'b0) && ret_valid && (refill_word_counter == reg_offset[3:2]);
+assign tagv_w1_we = refill && (replace_way == 1'b1) && ret_valid && (refill_word_counter == reg_offset[3:2]);
 assign tagv_wdata = {reg_tag, 1'b1}; // refill 的 cache block v 位自动置1
 assign tagv_addr  = {8{lookup_en}} & index |
                     {8{replace || refill}} & reg_index;
@@ -538,9 +533,7 @@ end
 
 
 // cache ----> CPU 输出信号的赋值
-assign addr_ok = (current_state == IDLE) ||
-                 (current_state == LOOKUP) && cache_hit &&
-                 valid && (~conflict_case1) && (~conflict_case2);
+assign addr_ok = lookup;
 assign data_ok = (current_state == LOOKUP) && (cache_hit || (reg_op == WRITE)) ||
                  (current_state == REFILL) && ret_valid && (refill_word_counter == reg_offset[3:2]) && (reg_op == READ);
 assign rdata   = load_res;

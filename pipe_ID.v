@@ -111,7 +111,7 @@ always @(posedge clk) begin
     if (reset) begin
         valid <= 1'b0;
     end
-    else if(ready_go && (br_taken || ex_WB || flush_WB || tlb_flush_WB)) begin // 如果需要跳转并且跳转了，则从下一个阶段开始valid就需要重置为零了
+    else if(ready_go && (ex_WB || flush_WB || tlb_flush_WB)) begin // 如果需要跳转并且跳转了，则从下一个阶段开始valid就需要重置为零了
         valid <= 1'b0;
     end
     else if(to_allowin) begin // 如果当前阶段允许数据进入，则数据是否有效就取决于上一阶段数据是否可以发出
@@ -553,16 +553,16 @@ always @(posedge clk) begin
     if (reset) begin
         tlb_flush <= 1'b0;
     end
-    else if (tlb_conflict) begin
-        tlb_flush <= 1'b1;
-    end
     else if (tlb_flush_WB) begin
         tlb_flush <= 1'b0;
+    end
+    else if (tlb_conflict) begin
+        tlb_flush <= 1'b1;
     end
 end
                     
 
-assign ertn_flush = inst_ertn;
+assign ertn_flush = inst_ertn && (exception_source == 14'b0);
 
 assign ex_int = has_int;
 assign ex_sys = inst_syscall;
